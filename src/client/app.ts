@@ -1,4 +1,4 @@
-import { recommend } from '../shared/allocation.js';
+import { allocateBank, recommend } from '../shared/allocation.js';
 import type {
   Analysis,
   AnalyzeRequest,
@@ -334,6 +334,7 @@ function appendCell(row: HTMLTableRowElement, text: string, className = '') {
 }
 function renderAllocation() {
   if (!state.result) return;
+  $('bank-plan').hidden = true;
   const input = $('budget');
   if (!input.value || !input.checkValidity() || Number(input.value) <= 0) {
     $('allocation').textContent =
@@ -348,8 +349,44 @@ function renderAllocation() {
     Number($('safety').value) / 100,
   );
   $('allocation').textContent = choice
-    ? `${choice.label} · ${choice.side}: до $${number(choice.total, 2)}; оставить $${number(budget - choice.total, 2)}. Ожидаемая прибыль по модели: $${money(choice.expectedProfit)}. Вся сумма покупки может быть потеряна.`
+    ? `Осторожный вариант: ${choice.label} · ${choice.side}: до $${number(choice.total, 2)}; оставить $${number(budget - choice.total, 2)}. Ожидаемая прибыль по модели: $${money(choice.expectedProfit)}. Вся сумма покупки может быть потеряна.`
     : 'Покупка не рекомендована: нет подтверждённого преимущества, свежих котировок или подходящей ликвидности. Оставить весь бюджет в деньгах.';
+  const plan = allocateBank(state.result, budget, Number($('expenses').value) / 100);
+  $('bank-plan').hidden = false;
+  $('bank-spending').textContent = `$${number(plan.invested, 2)} / $${number(plan.cash, 2)}`;
+  $('bank-ev').textContent = `$${money(plan.expectedProfit)}`;
+  $('bank-ev').className =
+    plan.expectedProfit > 0 ? 'positive' : plan.expectedProfit < 0 ? 'negative' : '';
+  $('bank-worst').textContent = `$${money(plan.worstProfit)}`;
+  $('bank-worst').className = plan.worstProfit < 0 ? 'negative' : '';
+  $('bank-rows').replaceChildren();
+  for (const item of plan.rows) {
+    const row = document.createElement('tr');
+    appendCell(row, `${item.label} · ${item.side}`);
+    const amount = appendCell(row, `$${number(item.total, 2)}`);
+    amount.title = `${number(item.shares, 2)} акций; сумма включает резерв расходов.`;
+    appendCell(row, pct(item.total / budget));
+    appendCell(
+      row,
+      money(item.expectedProfit),
+      item.expectedProfit > 0 ? 'positive' : item.expectedProfit < 0 ? 'negative' : '',
+    );
+    $('bank-rows').append(row);
+  }
+  if (!plan.rows.length) {
+    const row = document.createElement('tr');
+    appendCell(row, 'Нет доступного распределения.').colSpan = 4;
+    $('bank-rows').append(row);
+  }
+  $('bank-risk').textContent =
+    `Вероятность убытка по модели: ${pct(plan.lossProbability)}. Худший результат относится к совместным сценариям рынка, включая исходы вне загруженных диапазонов. Весь банк в покупках может быть потерян.`;
+  $('bank-warnings').replaceChildren();
+  for (const text of plan.warnings) {
+    const warning = document.createElement('div');
+    warning.className = 'warning';
+    warning.textContent = text;
+    $('bank-warnings').append(warning);
+  }
 }
 $('budget').addEventListener('input', renderAllocation);
 function renderPositions() {
@@ -544,13 +581,25 @@ function render(r: Analysis) {
     $('end').value = r.tracker.local_end;
     $('timezone').value = 'America/New_York';
   }
+  const lower = new Map(r.event?.markets.map((m) => [m.id, m.lower]));
   const outcomes = r.positions
     .filter((p) => p.side === 'YES')
-    .sort((a, b) => b.probability - a.probability);
+    .sort((a, b) => (lower.get(a.market_id) ?? 0) - (lower.get(b.market_id) ?? 0));
+  const mostLikely = outcomes.reduce<Position | undefined>(
+    (best, p) => (!best || p.probability > best.probability ? p : best),
+    undefined,
+  );
+  $('outcome-summary').textContent = mostLikely
+    ? `Диапазоны по возрастанию. Наиболее вероятный: ${mostLikely.label} · ${pct(mostLikely.probability, 2)}.`
+    : '';
   $('outcomes').replaceChildren();
   for (const p of outcomes) {
     const line = document.createElement('div');
     line.className = 'outcome';
+    line.classList.toggle(
+      'is-most-likely',
+      Boolean(mostLikely && p.probability > 0 && p.probability === mostLikely.probability),
+    );
     const label = document.createElement('span');
     label.className = 'outcome-label';
     label.textContent = p.label;

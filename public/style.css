@@ -258,8 +258,8 @@ aside,
 }
 #outcomes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
   margin-top: 12px;
 }
 .outcome {
@@ -268,6 +268,50 @@ aside,
   align-items: center;
   gap: 5px 8px;
   font: 11px var(--mono);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #0e151d;
+}
+.outcome.is-most-likely {
+  border-color: #527b60;
+  background: #173025;
+}
+#bank-plan {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+#bank-plan h3 {
+  margin: 0;
+}
+#bank-plan .table-scroll {
+  max-height: 260px;
+}
+.bank-table th {
+  position: sticky;
+  top: 0;
+}
+.bank-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.bank-metrics > div {
+  display: grid;
+  gap: 4px;
+}
+.bank-metrics span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.bank-metrics strong {
+  font: 14px var(--mono);
+}
+.bank-table th:first-child,
+.bank-table td:first-child {
+  padding-left: 10px;
 }
 .outcome-label {
   color: var(--muted);

@@ -18,6 +18,12 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   await expect(page.locator('#demo-banner')).toBeVisible();
   await expect(page.locator('#positions-body tr')).toHaveCount(14);
   const markets = [...analysis.event!.markets].sort((a, b) => a.lower - b.lower);
+  await expect(page.locator('#outcomes .outcome-label')).toHaveText(markets.map((m) => m.label));
+  await expect(page.locator('#outcome-summary')).toContainText('Диапазоны по возрастанию');
+  const peak = analysis.positions
+    .filter((p) => p.side === 'YES')
+    .sort((a, b) => b.probability - a.probability)[0];
+  await expect(page.locator('#outcomes .is-most-likely')).toContainText(peak.label);
   await expect(page.locator('#distribution svg rect')).toHaveCount(markets.length);
   for (const [i, market] of markets.entries()) {
     const p = analysis.positions.find(
@@ -35,11 +41,53 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   await page.locator('#budget').fill('200');
   await expect(page.locator('#result-content')).toBeVisible();
   await expect(page.locator('#allocation')).not.toBeEmpty();
+  await expect(page.locator('#bank-plan')).toBeVisible();
   await expect(page.locator('#outcomes progress')).toHaveCount(7);
   await page.locator('#go-live').click();
   await expect(page.locator('#demo-banner')).toBeHidden();
   await expect(page.locator('#result-content')).toBeHidden();
   expect(errors).toEqual([]);
+});
+
+test('Cash advice keeps a full-bank scenario visible and budget changes do not repeat forecasting', async ({
+  page,
+}) => {
+  let forecasts = 0;
+  await page.route('**/api/analyze', async (route) => {
+    forecasts++;
+    const response = await route.fetch();
+    const analysis = (await response.json()) as Analysis;
+    analysis.fresh = false;
+    analysis.dataset = 'xtracker';
+    analysis.event!.fetched_at = '2026-01-01T00:00:00Z';
+    for (const market of analysis.event!.markets)
+      for (const book of Object.values(market.books)) book.fetched_at = '2026-01-01T00:00:00Z';
+    for (const position of analysis.positions) position.signal = false;
+    await route.fulfill({ json: analysis });
+  });
+  await page.goto('/');
+  await page.locator('#demo-empty').click();
+  await expect(page.locator('#result-content')).toBeVisible();
+  for (const budget of [100, 200]) {
+    await page.locator('#budget').fill(String(budget));
+    await expect(page.locator('#allocation')).toContainText('Оставить весь бюджет в деньгах');
+    await expect(page.locator('#bank-plan')).toBeVisible();
+    await expect(page.locator('#bank-warnings')).toContainText('120 секунд');
+    await expect(page.locator('#bank-warnings')).toContainText('свежести');
+    const costs = await page.locator('#bank-rows td:nth-child(2)').allTextContents();
+    expect(costs.length).toBeGreaterThan(0);
+    const total = costs.reduce(
+      (sum, text) => sum + Number(text.replace(/\s|\$/g, '').replace(',', '.')),
+      0,
+    );
+    expect(total).toBeCloseTo(budget, 2);
+    await expect(page.locator('#bank-risk')).toContainText('Вероятность убытка');
+  }
+  expect(forecasts).toBe(1);
+  await page.locator('#bank-plan').screenshot({ path: '/tmp/tweetscope-bank-plan.png' });
+  await page.locator('#budget').fill('');
+  await expect(page.locator('#bank-plan')).toBeHidden();
+  await expect(page.locator('#result-content')).toBeVisible();
 });
 
 test('Position columns sort numerically both ways and explain headers on hover or focus', async ({
@@ -134,6 +182,8 @@ test('Many market brackets stay exact and readable within a horizontally scrolli
   await expect(page.locator('#distribution rect title').first()).toHaveText('0-19: 0,00%');
   await expect(page.locator('#distribution rect').first()).toHaveAttribute('height', '0');
   await expect(page.locator('#distribution rect title').last()).toContainText('500+');
+  await expect(page.locator('#outcomes .outcome-label').first()).toHaveText('0-19');
+  await expect(page.locator('#outcomes .outcome-label').last()).toHaveText('500+');
   expect(
     await page.locator('#distribution').evaluate((el) => el.scrollWidth > el.clientWidth),
   ).toBe(true);

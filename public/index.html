@@ -317,6 +317,7 @@
             </section>
             <section class="panel outcomes-panel">
               <h2>Вероятности исходов</h2>
+              <p id="outcome-summary" class="muted small"></p>
               <p class="muted small">
                 Оценки модели, а не гарантии. Ошибка модели может быть больше погрешности симуляции.
               </p>
@@ -336,6 +337,33 @@
                 /></label>
               </div>
               <p id="allocation" aria-live="polite"></p>
+              <div id="bank-plan" hidden>
+                <h3>Если использовать весь банк</h3>
+                <p class="muted small">
+                  Условное распределение по модели, даже когда покупка не рекомендована. Ожидаемая
+                  прибыль может быть отрицательной.
+                </p>
+                <div class="bank-metrics">
+                  <div><span>В покупках / остаток</span><strong id="bank-spending"></strong></div>
+                  <div><span>Ожидаемый результат</span><strong id="bank-ev"></strong></div>
+                  <div><span>Худший результат</span><strong id="bank-worst"></strong></div>
+                </div>
+                <div class="table-scroll">
+                  <table class="bank-table" aria-label="Условное распределение банка">
+                    <thead>
+                      <tr>
+                        <th scope="col">ПОЗИЦИЯ</th>
+                        <th scope="col">СУММА</th>
+                        <th scope="col">ДОЛЯ БАНКА</th>
+                        <th scope="col">EV, $</th>
+                      </tr>
+                    </thead>
+                    <tbody id="bank-rows"></tbody>
+                  </table>
+                </div>
+                <p id="bank-risk" class="muted small"></p>
+                <div id="bank-warnings" class="warnings"></div>
+              </div>
               <details class="budget-method">
                 <summary>Как выбирается сумма покупки</summary>
                 <p class="muted small">
@@ -343,6 +371,13 @@
                   максимум 25% бюджета. Остаток — в деньгах. Это осторожная эвристика, не
                   оптимизация портфеля; бюджет должен быть суммой, которую вы готовы потерять.
                   Изменение бюджета не пересчитывает прогноз.
+                </p>
+                <p class="muted small">
+                  Сценарий всего банка распределяет покупки YES и NO небольшими шагами, балансируя
+                  ожидаемую выплату и её разброс. Выплаты считаются совместно для каждого диапазона,
+                  с учётом глубины стакана и резерва расходов. Это эвристика, а не точное решение
+                  задачи оптимизации; запас к вероятности применяется к осторожной рекомендации. При
+                  нехватке ликвидности часть денег остаётся неразмещённой.
                 </p>
               </details>
             </section>
