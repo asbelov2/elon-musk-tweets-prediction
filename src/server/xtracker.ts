@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { Collection, CollectRequest, HourRow, TrackerReport } from '../shared/types.js';
+import { accountKey, cleanHandle, DEFAULT_HANDLE } from './accounts.js';
 import { ProviderError } from './errors.js';
 import { getJson, remoteTransport, type Transport } from './http.js';
 import { slugFrom } from './providers.js';
@@ -11,7 +12,7 @@ export const TRACKER_SOURCE = 'xtracker:post-counter:v1';
 const uuid = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
 const userSchema = z.object({
   id: uuid,
-  handle: z.literal('elonmusk'),
+  handle: z.string().regex(/^[a-zA-Z0-9_]{1,15}$/),
   platform: z.literal('X'),
   lastSync: z.string().nullable(),
   lastSyncError: z.string().nullable(),
@@ -45,6 +46,7 @@ const postSchema = z.object({
   createdAt: z.string(),
 });
 export const trackerReportSchema = z.object({
+  handle: z.string().optional(),
   tracking_id: uuid,
   slug: z.string(),
   title: z.string(),
@@ -97,12 +99,17 @@ export async function fetchTrackerCounter(
   transport: Transport = remoteTransport,
   now = Date.now(),
   trackingId?: string,
+  handle = DEFAULT_HANDLE,
 ): Promise<{ report: TrackerReport; rows: HourRow[] }> {
+  handle = cleanHandle(handle);
+  const userPath = `/users/${encodeURIComponent(handle)}`;
   let id = trackingId;
   if (!id) {
-    const profile = await data('/users/elonmusk?platform=X', userSchema, transport);
+    const profile = await data(userPath + '?platform=X', userSchema, transport);
+    if (accountKey(profile.handle) !== accountKey(handle))
+      throw new ProviderError('XTracker вернул другой аккаунт');
     const windows = await data(
-      '/users/elonmusk/trackings?platform=X&activeOnly=false',
+      userPath + '/trackings?platform=X&activeOnly=false',
       z.array(trackingSchema),
       transport,
     );
@@ -117,7 +124,11 @@ export async function fetchTrackerCounter(
   }
   if (!uuid.safeParse(id).success) throw new ProviderError('Некорректный ID трекинга XTracker');
   const detail = await data(`/trackings/${id}?includeStats=true`, detailSchema, transport);
-  if (detail.userId !== detail.user.id || trackingSlug(detail.marketLink) !== slug)
+  if (
+    accountKey(detail.user.handle) !== accountKey(handle) ||
+    detail.userId !== detail.user.id ||
+    trackingSlug(detail.marketLink) !== slug
+  )
     throw new ProviderError('XTracker вернул трекинг другого события или пользователя');
   const start = parseTime(detail.startDate),
     end = exclusiveEnd(detail.endDate),
@@ -170,6 +181,7 @@ export async function fetchTrackerCounter(
   return {
     rows,
     report: {
+      handle: detail.user.handle,
       tracking_id: detail.id,
       slug,
       title: detail.title,
@@ -193,20 +205,24 @@ export async function fetchTrackerCounter(
  * Verify full export against _count.posts; never invent publication types.
  */
 export async function collectTracker(
-  options: Pick<CollectRequest, 'days' | 'event_url'>,
+  options: Pick<CollectRequest, 'days' | 'event_url' | 'handle'>,
   transport: Transport = remoteTransport,
   now = Date.now(),
 ): Promise<Collection> {
   if (!options.event_url)
     throw new ProviderError('Для сбора XTracker укажите ссылку на событие Polymarket');
   const slug = slugFrom(options.event_url);
-  const profile = await data('/users/elonmusk?platform=X', userSchema, transport);
+  const handle = cleanHandle(options.handle ?? DEFAULT_HANDLE);
+  const userPath = `/users/${encodeURIComponent(handle)}`;
+  const profile = await data(userPath + '?platform=X', userSchema, transport);
+  if (accountKey(profile.handle) !== accountKey(handle))
+    throw new ProviderError('XTracker вернул другой аккаунт');
   if (!profile._count || profile._count.posts > 100_000)
     throw new ProviderError(
       'XTracker не подтвердил размер полного экспорта или он превышает 100000 публикаций',
     );
   const windows = await data(
-    '/users/elonmusk/trackings?platform=X&activeOnly=false',
+    userPath + '/trackings?platform=X&activeOnly=false',
     z.array(trackingSchema),
     transport,
   );
@@ -214,7 +230,7 @@ export async function collectTracker(
     matches = own.filter((w) => trackingSlug(w.marketLink) === slug);
   if (matches.length !== 1)
     throw new ProviderError('Не найдено однозначное окно XTracker для события');
-  const posts = await data('/users/elonmusk/posts?platform=X', z.array(postSchema), transport);
+  const posts = await data(userPath + '/posts?platform=X', z.array(postSchema), transport);
   const unique = new Map<string, number>();
   for (const post of posts) {
     if (post.userId !== profile.id)
@@ -225,7 +241,7 @@ export async function collectTracker(
     unique.set(post.platformId, t);
   }
   if (unique.size !== profile._count.posts) {
-    const after = await data('/users/elonmusk?platform=X', userSchema, transport);
+    const after = await data(userPath + '?platform=X', userSchema, transport);
     if (unique.size !== after._count?.posts)
       throw new ProviderError(
         'Экспорт XTracker усечён или изменился во время загрузки: число уникальных ID не совпадает с _count.posts. Повторите сбор.',
@@ -236,6 +252,7 @@ export async function collectTracker(
     transport,
     now,
     matches[0].id,
+    handle,
   );
   const covered = own.map((w) => [parseTime(w.startDate), exclusiveEnd(w.endDate)] as const);
   const end = hour(now),

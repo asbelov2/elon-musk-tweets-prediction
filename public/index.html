@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
       name="description"
-      content="Статистический анализ активности Илона Маска и ожидаемой доходности позиций Polymarket."
+      content="Статистический анализ публикаций аккаунтов X и ожидаемой доходности позиций Polymarket."
     />
     <title>TweetScope · Аналитика публикаций</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
@@ -28,7 +28,7 @@
           <div class="eyebrow">АКТИВНОСТЬ → ВЕРОЯТНОСТЬ → ЦЕНА</div>
           <h1>За цифрами — <span>вероятности.</span></h1>
           <p>
-            Прогноз числа публикаций Илона Маска и поиск позиций с положительным математическим
+            Прогноз числа публикаций аккаунтов X и поиск позиций с положительным математическим
             ожиданием.
           </p>
         </div>
@@ -40,6 +40,42 @@
         <button id="go-live" class="text-button">Перейти к реальным данным →</button>
       </div>
       <div id="message" class="notice" role="status" hidden></div>
+      <section class="panel market-picker">
+        <div class="market-picker-row">
+          <label
+            >Выбранный рынок<select id="market-select">
+              <option value="">Загрузка рынков…</option>
+            </select></label
+          >
+          <p id="selected-account" class="muted small">История и прогноз: @elonmusk</p>
+        </div>
+        <details id="add-market-form">
+          <summary>Добавить рынок публикаций</summary>
+          <div class="market-fields">
+            <label
+              >Ссылка на событие Polymarket<input
+                id="new-market-url"
+                type="url"
+                placeholder="https://polymarket.com/event/…"
+            /></label>
+            <label
+              >Аккаунт как в XTracker<input
+                id="new-market-handle"
+                type="text"
+                maxlength="16"
+                placeholder="Например, WhiteHouse"
+            /></label>
+            <label
+              >Название (необязательно)<input id="new-market-label" type="text" maxlength="120"
+            /></label>
+          </div>
+          <button id="add-market" class="button secondary">Проверить и добавить рынок</button>
+          <p class="muted small">
+            Поддерживаются рынки количества публикаций с Post Counter XTracker. Ссылка и аккаунт
+            проверяются по источнику. Каталог сохраняется; история разных аккаунтов разделена.
+          </p>
+        </details>
+      </section>
       <div class="workspace">
         <aside>
           <section class="panel setup-panel">
@@ -167,7 +203,7 @@
               Сверить Post Counter и период
             </button>
             <div id="tracker-counter" class="notice" hidden>
-              <strong>Post Counter · XTracker</strong>
+              <strong id="tracker-heading">Post Counter · XTracker</strong>
               <p id="tracker-summary"></p>
             </div>
             <label

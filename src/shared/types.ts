@@ -1,4 +1,10 @@
 export type Dataset = 'live' | 'demo' | 'xtracker';
+export interface MarketConfig {
+  id: string;
+  label: string;
+  handle: string;
+  event_url: string;
+}
 export type Side = 'yes' | 'no';
 /** UTC epoch milliseconds, count. Missing hours are unknown, never zero. */
 export type HourRow = [number, number];
@@ -24,6 +30,7 @@ export interface Market {
   question?: string;
 }
 export interface MarketEvent {
+  handle?: string;
   slug: string;
   title: string;
   description: string;
@@ -95,6 +102,7 @@ export interface ForecastOutput {
   result: ForecastSummary;
 }
 export interface Analysis extends ForecastSummary {
+  handle?: string;
   dataset: Dataset;
   sources: string[];
   start: string;
@@ -105,6 +113,7 @@ export interface Analysis extends ForecastSummary {
   tracker?: TrackerReport;
 }
 export interface AnalyzeRequest {
+  handle?: string;
   dataset: Dataset;
   event_url: string;
   start: string;
@@ -116,6 +125,7 @@ export interface AnalyzeRequest {
   rules_confirmed: boolean;
 }
 export interface CollectRequest {
+  handle?: string;
   source: 'x' | 'xtracker';
   mode: 'archive' | 'timeline';
   days: number;
@@ -140,6 +150,7 @@ export interface DataStatus {
   end: string | null;
 }
 export interface Status {
+  handle?: string;
   live: DataStatus;
   demo: DataStatus;
   xtracker: DataStatus;
@@ -150,6 +161,7 @@ export interface CounterAnchor {
   as_of: number;
 }
 export interface TrackerReport {
+  handle?: string;
   tracking_id: string;
   slug: string;
   title: string;

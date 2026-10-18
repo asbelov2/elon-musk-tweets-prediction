@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { parse } from 'csv-parse/sync';
 import { z } from 'zod';
 import type { Dataset, HourData, HourRow, MarketEvent } from '../shared/types.js';
+import { accountKey, DEFAULT_HANDLE } from './accounts.js';
 import { AppError } from './errors.js';
 import { hour, iso, parseTime } from './time.js';
 
@@ -30,7 +31,9 @@ export class Store {
     source = 'csv',
     now = Date.now(),
     metadata?: { key: string; value: unknown },
+    handle = DEFAULT_HANDLE,
   ): number {
+    const key = this.datasetKey(dataset, handle);
     const seen = new Set<number>(),
       cutoff = hour(now);
     for (const [time, count] of rows) {
@@ -47,10 +50,10 @@ export class Store {
       const insert = this.db.prepare(
         'INSERT INTO hours VALUES (?,?,?,?) ON CONFLICT(dataset,ts) DO UPDATE SET count=excluded.count,source=excluded.source',
       );
-      for (const [time, count] of rows) insert.run(dataset, databaseTime(time), count, source);
+      for (const [time, count] of rows) insert.run(key, databaseTime(time), count, source);
       this.db
         .prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)')
-        .run(dataset + ':updated', iso(now));
+        .run(key + ':updated', iso(now));
       if (metadata)
         this.db
           .prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)')
@@ -62,12 +65,12 @@ export class Store {
     }
     return rows.length;
   }
-  load(dataset: Dataset = 'live'): { data: HourData; sources: string[] } {
+  load(dataset: Dataset = 'live', handle = DEFAULT_HANDLE): { data: HourData; sources: string[] } {
     const data: HourData = new Map(),
       sources = new Set<string>();
     for (const row of this.db
       .prepare('SELECT ts,count,source FROM hours WHERE dataset=? ORDER BY ts')
-      .all(dataset)) {
+      .all(this.datasetKey(dataset, handle))) {
       if (
         typeof row.ts !== 'string' ||
         typeof row.count !== 'number' ||
@@ -84,6 +87,14 @@ export class Store {
       sources.add(row.source);
     }
     return { data: new Map([...data].sort(([a], [b]) => a - b)), sources: [...sources] };
+  }
+  private datasetKey(dataset: Dataset, handle: string): string {
+    const key = accountKey(handle);
+    // Existing unscoped hours belong to Elon. Preserve legacy rows and UTC keys.
+    return key === DEFAULT_HANDLE ? dataset : `${dataset}@${key}`;
+  }
+  setMetadata(key: string, value: unknown): void {
+    this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(key, JSON.stringify(value));
   }
   snapshot(slug: string, event: MarketEvent): void {
     this.db

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { trackerFixture, SLUG } from '../fixtures/xtracker.js';
+import { trackerFixture, whiteHouseFixture, SLUG, WHITE_HOUSE_SLUG } from '../fixtures/xtracker.js';
 import { collectTracker } from '../../src/server/xtracker.js';
 import type { Analysis } from '../../src/shared/types.js';
 
@@ -242,7 +242,15 @@ test('X source controls and offline API documentation', async ({ page }) => {
   await page.locator('#x-mode').selectOption('timeline');
   await expect(page.locator('#x-options')).toBeVisible();
   await page.goto('/api/docs');
-  await expect(page.locator('#api-paths summary')).toHaveCount(10);
+  await expect(
+    page.locator('#api-paths summary').filter({ hasText: 'GET /api/markets' }),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('#api-paths summary').filter({ hasText: 'POST /api/markets' }),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('#api-paths summary').filter({ hasText: 'POST /api/analyze' }),
+  ).toHaveCount(1);
   expect(await page.locator('#api-schemas summary').count()).toBeGreaterThanOrEqual(2);
   expect(errors).toEqual([]);
 });
@@ -282,7 +290,7 @@ test('XTracker preview, isolated history and authoritative period controls', asy
     report = collection.tracker!;
   let saved = false;
   const empty = { hours: 0, posts: 0, sources: [], start: null, end: null };
-  await page.route('**/api/status', (route) =>
+  await page.route('**/api/status*', (route) =>
     route.fulfill({
       json: {
         live: empty,
@@ -336,4 +344,95 @@ test('XTracker preview, isolated history and authoritative period controls', asy
   await page.locator('#start').fill('2026-10-14T12:00');
   await page.locator('#sync-tracker').click();
   await expect(page.locator('#start')).toHaveValue(report.local_start);
+});
+
+test('Market switching resets results and ignores a late counter from the previous account', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.locator('#market-select option')).toHaveCount(2);
+  await page.locator('#demo-empty').click();
+  await expect(page.locator('#result-content')).toBeVisible();
+  await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
+  await expect(page.locator('#result-content')).toBeHidden();
+  await expect(page.locator('#demo-banner')).toBeHidden();
+  await expect(page.locator('#selected-account')).toContainText('@WhiteHouse');
+  await expect(page.locator('#event-url')).toHaveValue(
+    'https://polymarket.com/event/' + WHITE_HOUSE_SLUG,
+  );
+  await expect(page.locator('#rules-confirm')).not.toBeChecked();
+  await expect(page.locator('#export-history')).toHaveAttribute('href', /handle=WhiteHouse/);
+  const f = whiteHouseFixture();
+  const report = (
+    await collectTracker(
+      { days: 30, event_url: WHITE_HOUSE_SLUG, handle: 'WhiteHouse' },
+      f.transport,
+      f.now,
+    )
+  ).tracker!;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route('**/api/xtracker?*', async (route) => {
+    expect(new URL(route.request().url()).searchParams.get('handle')).toBe('WhiteHouse');
+    started();
+    await gate;
+    await route.fulfill({ json: report });
+  });
+  await page.locator('#sync-tracker').click();
+  await requested;
+  await page.locator('#market-select').selectOption(SLUG);
+  release();
+  await expect(page.locator('#sync-tracker')).toBeEnabled();
+  await expect(page.locator('#tracker-counter')).toBeHidden();
+  await expect(page.locator('#event-url')).toHaveValue('https://polymarket.com/event/' + SLUG);
+  await expect(page.locator('#selected-account')).toContainText('@elonmusk');
+  await expect(page.locator('#start')).toHaveValue('');
+  await expect(page.locator('#event-title')).toHaveText('Рынок ещё не загружен');
+});
+
+test('Adding a verified market makes it selectable and visible after reloading the catalog', async ({
+  page,
+}) => {
+  let added = false;
+  const item = {
+    id: 'nasa-posts-next-week',
+    label: 'NASA posts',
+    handle: 'NASA',
+    event_url: 'https://polymarket.com/event/nasa-posts-next-week',
+  };
+  await page.route('**/api/markets', async (route) => {
+    if (route.request().method() === 'POST') {
+      expect(route.request().postDataJSON()).toEqual({
+        handle: 'NASA',
+        event_url: item.event_url,
+        label: item.label,
+      });
+      added = true;
+      await route.fulfill({ json: item });
+    } else {
+      const response = await route.fetch();
+      const markets = (await response.json()) as unknown[];
+      await route.fulfill({ json: added ? [...markets, item] : markets });
+    }
+  });
+  await page.goto('/');
+  await expect(page.locator('#market-select option')).toHaveCount(2);
+  await page.locator('#add-market-form summary').click();
+  await page.locator('#new-market-url').fill(item.event_url);
+  await page.locator('#new-market-handle').fill(item.handle);
+  await page.locator('#new-market-label').fill(item.label);
+  await page.locator('#add-market').click();
+  await expect(page.locator('#market-select')).toHaveValue(item.id);
+  await expect(page.locator('#selected-account')).toContainText('@NASA');
+  await expect(page.locator('#message')).toContainText('Рынок проверен и сохранён');
+  await page.reload();
+  await expect(page.locator('#market-select option')).toHaveCount(3);
+  await page.locator('#market-select').selectOption(item.id);
+  await expect(page.locator('#event-url')).toHaveValue(item.event_url);
 });

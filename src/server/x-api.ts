@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Collection, CollectRequest } from '../shared/types.js';
+import { cleanHandle, DEFAULT_HANDLE } from './accounts.js';
 import { ProviderError } from './errors.js';
 import { endpoint, record, remoteTransport, type RemoteResponse, type Transport } from './http.js';
 import { DAY, HOUR, hour, iso, parseTime } from './time.js';
@@ -69,11 +70,12 @@ const pageSchema = z.object({
   meta: z.object({ next_token: z.string().optional() }).default({}),
 });
 export async function collectX(
-  options: Pick<CollectRequest, 'days' | 'include_replies' | 'include_reposts' | 'mode'>,
+  options: Pick<CollectRequest, 'days' | 'include_replies' | 'include_reposts' | 'mode' | 'handle'>,
   transport: Transport = remoteTransport,
   now = Date.now(),
   env: Credentials = process.env,
 ): Promise<Collection> {
+  const handle = cleanHandle(options.handle ?? DEFAULT_HANDLE);
   const token = env.X_BEARER_TOKEN || env.TWITTER_BEARER_TOKEN;
   if (!token)
     throw new ProviderError(
@@ -84,10 +86,15 @@ export async function collectX(
   let path: string, params: Record<string, string | number>;
   const apiTime = (t: number) => iso(t).replace('.000Z', 'Z');
   if (options.mode === 'timeline') {
-    const user = await xGet('/2/users/by/username/elonmusk', {}, transport, token);
+    const user = await xGet(
+      '/2/users/by/username/' + encodeURIComponent(handle),
+      {},
+      transport,
+      token,
+    );
     const uid = record(user.data) ? user.data.id : undefined;
     if (typeof uid !== 'string' || !/^\d+$/.test(uid))
-      throw new ProviderError('API X не вернул ID пользователя elonmusk');
+      throw new ProviderError('API X не вернул ID пользователя ' + handle);
     path = `/2/users/${uid}/tweets`;
     // No start_time: require an older boundary post to detect the timeline cap.
     params = {
@@ -98,7 +105,7 @@ export async function collectX(
   } else {
     path = '/2/tweets/search/all';
     params = {
-      query: 'from:elonmusk',
+      query: 'from:' + handle,
       start_time: apiTime(start),
       end_time: apiTime(end),
       max_results: 500,

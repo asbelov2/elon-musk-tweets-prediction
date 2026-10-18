@@ -231,6 +231,33 @@ aside,
 .results {
   min-width: 0;
 }
+.market-picker {
+  margin-bottom: 12px;
+}
+.market-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.market-picker-row label {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.market-picker-row p {
+  margin: 0;
+}
+.market-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 12px;
+}
+#add-market-form {
+  margin-bottom: 0;
+}
+.market-picker details p {
+  white-space: normal;
+}
 .panel > :first-child {
   margin-top: 0;
 }
@@ -980,6 +1007,15 @@ footer > span:last-child {
   }
 }
 @media (max-width: 760px) {
+  .market-picker-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .market-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
   .topbar {
     height: 60px;
     gap: 15px;

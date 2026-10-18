@@ -15,6 +15,8 @@ import type {
   Status,
   TrackerReport,
 } from '../shared/types.js';
+import { accountKey, DEFAULT_HANDLE } from './accounts.js';
+import { listMarkets, resolveHandle, saveMarket } from './markets.js';
 import { demoEvent, demoHours } from './demo.js';
 import { AppError } from './errors.js';
 import { runForecast } from './forecast-runner.js';
@@ -31,8 +33,12 @@ import {
   trackerReportSchema,
 } from './xtracker.js';
 
+const Handle = Type.Optional(
+  Type.String({ minLength: 1, maxLength: 16, pattern: '^@?[a-zA-Z0-9_]{1,15}$' }),
+);
 const AnalyzeBody = Type.Object(
   {
+    handle: Handle,
     dataset: Type.Union([Type.Literal('live'), Type.Literal('demo'), Type.Literal('xtracker')], {
       default: 'xtracker',
     }),
@@ -49,6 +55,7 @@ const AnalyzeBody = Type.Object(
 );
 const CollectBody = Type.Object(
   {
+    handle: Handle,
     source: Type.Union([Type.Literal('x'), Type.Literal('xtracker')], { default: 'xtracker' }),
     event_url: Type.String({ default: '', maxLength: 500 }),
     mode: Type.Union([Type.Literal('archive'), Type.Literal('timeline')], { default: 'archive' }),
@@ -132,13 +139,59 @@ export async function createApp(options: AppOptions = {}) {
   app.get('/api/health', { schema: { summary: 'Проверка процесса' } }, async () => ({
     status: 'ok',
   }));
+  app.get('/api/markets', { schema: { summary: 'Каталог рынков публикаций' } }, async () =>
+    listMarkets(store),
+  );
+  app.post(
+    '/api/markets',
+    {
+      schema: {
+        summary: 'Добавить рынок публикаций в каталог',
+        body: Type.Object(
+          {
+            event_url: Type.String({ minLength: 1, maxLength: 500 }),
+            handle: Type.String({ minLength: 1, maxLength: 16, pattern: '^@?[a-zA-Z0-9_]{1,15}$' }),
+            label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      const handle = resolveHandle(store, request.body.event_url, request.body.handle);
+      const slug = slugFrom(request.body.event_url);
+      const event = await fetchEvent(slug, options.transport);
+      const { report } = await fetchTrackerCounter(
+        slug,
+        options.transport,
+        now(),
+        undefined,
+        handle,
+      );
+      const config = {
+        id: slug,
+        label: request.body.label?.trim() || event.title,
+        handle: report.handle ?? handle,
+        event_url: 'https://polymarket.com/event/' + slug,
+      };
+      saveMarket(store, config);
+      store.snapshot(slug, { ...event, handle: config.handle });
+      return listMarkets(store).find((market) => market.id === slug)!;
+    },
+  );
   app.get(
     '/api/status',
-    { schema: { summary: 'Покрытие истории и наличие ключа X' } },
-    async () => {
-      const result = {} as Status;
+    {
+      schema: {
+        summary: 'Покрытие истории выбранного аккаунта и наличие ключа X',
+        querystring: Type.Object({ handle: Handle }),
+      },
+    },
+    async (request) => {
+      const handle = resolveHandle(store, undefined, request.query.handle);
+      const result = { handle } as Status;
       for (const dataset of ['live', 'demo', 'xtracker'] as Dataset[]) {
-        const { data, sources } = store.load(dataset),
+        const { data, sources } = store.load(dataset, handle),
           times = [...data.keys()];
         result[dataset] = {
           hours: data.size,
@@ -158,7 +211,11 @@ export async function createApp(options: AppOptions = {}) {
       schema: {
         summary: 'Импорт полного почасового CSV',
         body: Type.Object(
-          { content: Type.String({ maxLength: 5_000_000 }), coverage_confirmed: Confirmed },
+          {
+            handle: Handle,
+            content: Type.String({ maxLength: 5_000_000 }),
+            coverage_confirmed: Confirmed,
+          },
           { additionalProperties: false },
         ),
       },
@@ -167,7 +224,14 @@ export async function createApp(options: AppOptions = {}) {
       if (!request.body.coverage_confirmed)
         throw new AppError('Подтвердите полноту часов и соответствие правилам подсчёта');
       return {
-        imported_hours: store.saveHours(readCsv(request.body.content), 'live', 'csv', now()),
+        imported_hours: store.saveHours(
+          readCsv(request.body.content),
+          'live',
+          'csv',
+          now(),
+          undefined,
+          resolveHandle(store, undefined, request.body.handle),
+        ),
       };
     },
   );
@@ -177,6 +241,7 @@ export async function createApp(options: AppOptions = {}) {
       schema: {
         summary: 'Экспорт реальной почасовой истории',
         querystring: Type.Object({
+          handle: Handle,
           dataset: Type.Union([Type.Literal('live'), Type.Literal('xtracker')], {
             default: 'live',
           }),
@@ -184,7 +249,10 @@ export async function createApp(options: AppOptions = {}) {
       },
     },
     async (request, reply) => {
-      const { data } = store.load(request.query.dataset);
+      const { data } = store.load(
+        request.query.dataset,
+        resolveHandle(store, undefined, request.query.handle),
+      );
       return reply
         .header('Content-Disposition', 'attachment; filename=tweets-hourly.csv')
         .type('text/csv; charset=utf-8')
@@ -193,10 +261,16 @@ export async function createApp(options: AppOptions = {}) {
   );
   app.post(
     '/api/demo',
-    { schema: { summary: 'Создать изолированную синтетическую историю' } },
-    async () => {
-      store.saveHours(demoHours(now()), 'demo', 'synthetic', now());
-      return demoEvent(now());
+    {
+      schema: {
+        summary: 'Создать изолированную синтетическую историю',
+        body: Type.Object({ handle: Handle }),
+      },
+    },
+    async (request) => {
+      const handle = resolveHandle(store, undefined, request.body.handle);
+      store.saveHours(demoHours(now()), 'demo', 'synthetic', now(), undefined, handle);
+      return { ...demoEvent(now()), handle };
     },
   );
   app.get(
@@ -204,11 +278,15 @@ export async function createApp(options: AppOptions = {}) {
     {
       schema: {
         summary: 'Загрузить событие и стаканы',
-        querystring: Type.Object({ url: Type.String({ maxLength: 500 }) }),
+        querystring: Type.Object({ url: Type.String({ maxLength: 500 }), handle: Handle }),
       },
     },
     async (request) => {
-      const event = await fetchEvent(slugFrom(request.query.url), options.transport);
+      const handle = resolveHandle(store, request.query.url, request.query.handle);
+      const event = {
+        ...(await fetchEvent(slugFrom(request.query.url), options.transport)),
+        handle,
+      };
       store.snapshot(event.slug, event);
       return event;
     },
@@ -217,7 +295,10 @@ export async function createApp(options: AppOptions = {}) {
     '/api/collect',
     { schema: { summary: 'Предпросмотр сбора API X / XTracker', body: CollectBody } },
     async (request) => {
-      const config = request.body;
+      const config = {
+        ...request.body,
+        handle: resolveHandle(store, request.body.event_url, request.body.handle),
+      };
       const collected =
         config.source === 'x'
           ? await collectX(config, options.transport, now(), env)
@@ -267,9 +348,10 @@ export async function createApp(options: AppOptions = {}) {
         item.tracker
           ? { key: 'tracker:import:' + item.tracker.slug, value: item.tracker }
           : undefined,
+        config.handle,
       );
       staged.delete(request.body.preview_id);
-      return { imported_hours, dataset };
+      return { imported_hours, dataset, handle: config.handle };
     },
   );
   app.get(
@@ -277,10 +359,11 @@ export async function createApp(options: AppOptions = {}) {
     {
       schema: {
         summary: 'Post Counter и границы трекинга XTracker',
-        querystring: Type.Object({ url: Type.String({ maxLength: 500 }) }),
+        querystring: Type.Object({ url: Type.String({ maxLength: 500 }), handle: Handle }),
       },
     },
     async (request) => {
+      const handle = resolveHandle(store, request.query.url, request.query.handle);
       const slug = slugFrom(request.query.url),
         cached = trackerReportSchema.safeParse(
           store.getMetadata('tracker:' + slug) ?? store.getMetadata('tracker:import:' + slug),
@@ -289,7 +372,10 @@ export async function createApp(options: AppOptions = {}) {
         slug,
         options.transport,
         now(),
-        cached.success ? cached.data.tracking_id : undefined,
+        cached.success && accountKey(cached.data.handle ?? DEFAULT_HANDLE) === accountKey(handle)
+          ? cached.data.tracking_id
+          : undefined,
+        handle,
       );
       report.as_of = iso(now());
       return report;
@@ -300,6 +386,11 @@ export async function createApp(options: AppOptions = {}) {
     { schema: { summary: 'Прогноз и оценка загруженного снимка', body: AnalyzeBody } },
     async (request): Promise<Analysis> => {
       const body = request.body;
+      const handle = resolveHandle(
+        store,
+        body.dataset === 'demo' ? undefined : body.event_url,
+        body.handle,
+      );
       const marketWindow = body.dataset === 'xtracker' && Boolean(body.event_url);
       let start = marketWindow ? 0 : localTime(body.start, body.timezone),
         end = marketWindow ? 0 : localTime(body.end, body.timezone);
@@ -313,7 +404,10 @@ export async function createApp(options: AppOptions = {}) {
           slug,
           options.transport,
           now(),
-          cached.success ? cached.data.tracking_id : undefined,
+          cached.success && accountKey(cached.data.handle ?? DEFAULT_HANDLE) === accountKey(handle)
+            ? cached.data.tracking_id
+            : undefined,
+          handle,
         );
         tracker = fresh.report;
         tracker.as_of = iso(now());
@@ -321,12 +415,19 @@ export async function createApp(options: AppOptions = {}) {
         end = parseTime(tracker.end);
         // Refresh explicitly supplied complete buckets, including late tracker corrections.
         if (fresh.rows.length)
-          store.saveHours(fresh.rows, 'xtracker', TRACKER_SOURCE, now(), {
-            key: 'tracker:' + slug,
-            value: tracker,
-          });
+          store.saveHours(
+            fresh.rows,
+            'xtracker',
+            TRACKER_SOURCE,
+            now(),
+            {
+              key: 'tracker:' + slug,
+              value: tracker,
+            },
+            handle,
+          );
       }
-      const { data, sources } = store.load(body.dataset);
+      const { data, sources } = store.load(body.dataset, handle);
       const { draws, result } = await runForecast({
         rows: [...data],
         start,
@@ -337,6 +438,7 @@ export async function createApp(options: AppOptions = {}) {
       });
       const analysis: Analysis = {
         ...result,
+        handle,
         dataset: body.dataset,
         sources,
         start: iso(start),
