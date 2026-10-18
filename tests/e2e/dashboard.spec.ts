@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test';
 import { trackerFixture, SLUG } from '../fixtures/xtracker.js';
 import { collectTracker } from '../../src/server/xtracker.js';
 
-test('Demo, charts, position filters and parameter invalidation', async ({ page }) => {
+test('Demo, outcome probabilities and interactive budget without recalculation', async ({
+  page,
+}) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
@@ -14,9 +16,9 @@ test('Demo, charts, position filters and parameter invalidation', async ({ page 
   await page.locator('#position-filter').selectOption('YES');
   await expect(page.locator('#positions-body tr')).toHaveCount(7);
   await page.locator('#budget').fill('200');
-  await expect(page.locator('#result-content')).toBeHidden();
-  await page.locator('#analyze').click();
   await expect(page.locator('#result-content')).toBeVisible();
+  await expect(page.locator('#allocation')).not.toBeEmpty();
+  await expect(page.locator('#outcomes progress')).toHaveCount(7);
   await page.locator('#go-live').click();
   await expect(page.locator('#demo-banner')).toBeHidden();
   await expect(page.locator('#result-content')).toBeHidden();

@@ -238,10 +238,12 @@ test('XTracker workflow anchors Post Counter, isolates history and blocks signal
   const wrong = await app.inject({
     method: 'POST',
     url: '/api/analyze',
-    payload: { ...payload, end: iso(f.end + HOUR) },
+    payload: { ...payload, start: '', end: iso(f.end + HOUR), timezone: 'UTC' },
   });
-  assert.equal(wrong.statusCode, 400);
-  assert.match(wrong.json<{ detail: string }>().detail, /Период/);
+  assert.equal(wrong.statusCode, 200);
+  assert.equal(wrong.json<Analysis>().end, iso(f.end));
+  assert.equal(wrong.json<Analysis>().start, iso(f.start));
+  assert.equal(wrong.json<Analysis>().timezone, 'America/New_York');
   const exported = await app.inject('/api/export?dataset=xtracker');
   assert.equal(readCsv(exported.body).length, 720);
 });

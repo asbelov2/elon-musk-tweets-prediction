@@ -25,7 +25,6 @@ import { HOUR, iso, localTime, parseTime } from './time.js';
 import { evaluate } from './trading.js';
 import { collectX, credentialsPresent, type Credentials } from './x-api.js';
 import {
-  assertTrackerPeriod,
   collectTracker,
   fetchTrackerCounter,
   TRACKER_SOURCE,
@@ -300,9 +299,10 @@ export async function createApp(options: AppOptions = {}) {
     '/api/analyze',
     { schema: { summary: 'Прогноз и оценка загруженного снимка', body: AnalyzeBody } },
     async (request): Promise<Analysis> => {
-      const body = request.body,
-        start = localTime(body.start, body.timezone),
-        end = localTime(body.end, body.timezone);
+      const body = request.body;
+      const marketWindow = body.dataset === 'xtracker' && Boolean(body.event_url);
+      let start = marketWindow ? 0 : localTime(body.start, body.timezone),
+        end = marketWindow ? 0 : localTime(body.end, body.timezone);
       let tracker: TrackerReport | undefined;
       if (body.dataset === 'xtracker' && body.event_url) {
         const slug = slugFrom(body.event_url),
@@ -317,7 +317,8 @@ export async function createApp(options: AppOptions = {}) {
         );
         tracker = fresh.report;
         tracker.as_of = iso(now());
-        assertTrackerPeriod(tracker, start, end);
+        start = parseTime(tracker.start);
+        end = parseTime(tracker.end);
         // Refresh explicitly supplied complete buckets, including late tracker corrections.
         if (fresh.rows.length)
           store.saveHours(fresh.rows, 'xtracker', TRACKER_SOURCE, now(), {
@@ -330,7 +331,7 @@ export async function createApp(options: AppOptions = {}) {
         rows: [...data],
         start,
         end,
-        timezone: body.timezone,
+        timezone: marketWindow ? 'America/New_York' : body.timezone,
         now: now(),
         anchor: tracker ? { count: tracker.count, as_of: parseTime(tracker.as_of) } : undefined,
       });

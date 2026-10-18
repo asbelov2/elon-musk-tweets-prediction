@@ -1,3 +1,4 @@
+import { recommend } from '../shared/allocation.js';
 import type {
   Analysis,
   AnalyzeRequest,
@@ -199,7 +200,13 @@ function showEvent(event: MarketEvent) {
   $('market-rules').open = true;
 }
 function params(): AnalyzeRequest {
-  for (const id of ['start', 'end', 'budget', 'expenses', 'safety'] as const) {
+  for (const id of ['start', 'end', 'expenses', 'safety'] as const) {
+    if (
+      ['start', 'end'].includes(id) &&
+      state.dataset === 'xtracker' &&
+      $('event-url').value.trim()
+    )
+      continue;
     if (!$(id).value || !$(id).checkValidity())
       throw new Error('Проверьте поле: ' + ($(id).parentElement?.textContent ?? id).trim());
   }
@@ -209,7 +216,7 @@ function params(): AnalyzeRequest {
     start: $('start').value,
     end: $('end').value,
     timezone: $('timezone').value,
-    budget: Number($('budget').value),
+    budget: 100,
     expense_bps: Number($('expenses').value) * 100,
     safety_pp: Number($('safety').value),
     rules_confirmed: $('rules-confirm').checked,
@@ -312,7 +319,28 @@ function appendCell(row: HTMLTableRowElement, text: string, className = '') {
   row.append(td);
   return td;
 }
+function renderAllocation() {
+  if (!state.result) return;
+  const input = $('budget');
+  if (!input.value || !input.checkValidity() || Number(input.value) <= 0) {
+    $('allocation').textContent =
+      'Укажите общий бюджет, чтобы получить ориентир по покупке. Для вероятностей бюджет не нужен.';
+    return;
+  }
+  const budget = Number(input.value);
+  const choice = recommend(
+    state.result,
+    budget,
+    Number($('expenses').value) / 100,
+    Number($('safety').value) / 100,
+  );
+  $('allocation').textContent = choice
+    ? `${choice.label} · ${choice.side}: до $${number(choice.total, 2)}; оставить $${number(budget - choice.total, 2)}. Ожидаемая прибыль по модели: $${money(choice.expectedProfit)}. Вся сумма покупки может быть потеряна.`
+    : 'Покупка не рекомендована: нет подтверждённого преимущества, свежих котировок или подходящей ликвидности. Оставить весь бюджет в деньгах.';
+}
+$('budget').addEventListener('input', renderAllocation);
 function renderPositions() {
+  renderAllocation();
   const r = state.result;
   if (!r) return;
   const body = $('positions-body');
@@ -388,7 +416,29 @@ function renderPositions() {
     : 'EV = вероятность × число акций − стоимость − резерв расходов. Цена покупки — средняя по доступным asks. Наведите на цену и оценку, чтобы увидеть расчёт и ограничения.';
 }
 function render(r: Analysis) {
-  if (r.tracker) showTracker(r.tracker);
+  if (r.tracker) {
+    showTracker(r.tracker);
+    $('start').value = r.tracker.local_start;
+    $('end').value = r.tracker.local_end;
+    $('timezone').value = 'America/New_York';
+  }
+  const outcomes = r.positions
+    .filter((p) => p.side === 'YES')
+    .sort((a, b) => b.probability - a.probability);
+  $('outcomes').replaceChildren();
+  for (const p of outcomes) {
+    const line = document.createElement('p');
+    line.textContent = `${p.label}: ${pct(p.probability, 2)}`;
+    const bar = document.createElement('progress');
+    bar.max = 1;
+    bar.value = p.probability;
+    bar.style.width = '100%';
+    line.append(bar);
+    $('outcomes').append(line);
+  }
+  if (!outcomes.length)
+    $('outcomes').textContent =
+      'Для отдельного прогноза смотрите распределение числа публикаций выше.';
   $('current-count-label').textContent = r.tracker ? 'Post Counter · XTracker' : 'Уже учтено';
   $('empty-state').hidden = true;
   $('result-content').hidden = false;
@@ -540,16 +590,7 @@ $('analyze').addEventListener('click', () =>
   }),
 );
 $('position-filter').addEventListener('change', renderPositions);
-for (const id of [
-  'event-url',
-  'start',
-  'end',
-  'timezone',
-  'budget',
-  'expenses',
-  'safety',
-  'rules-confirm',
-])
+for (const id of ['event-url', 'start', 'end', 'timezone', 'expenses', 'safety', 'rules-confirm'])
   $(id).addEventListener('input', () => {
     invalidate();
     if (['event-url', 'start', 'end', 'timezone'].includes(id)) $('rules-confirm').checked = false;
@@ -564,9 +605,10 @@ $('one-day').addEventListener('click', () => {
   dt.setUTCDate(dt.getUTCDate() + 1);
   $('start').value = value + 'T00:00';
   $('end').value = dt.toISOString().slice(0, 10) + 'T00:00';
+  $('event-url').value = '';
   $('rules-confirm').checked = false;
   invalidate();
-  message('Выбраны сутки. Для прогноза без оценки рыночных позиций очистите ссылку на событие.');
+  message('Выбраны сутки: отдельный прогноз без рыночных позиций.');
 });
 setInterval(() => {
   if (state.result) renderPositions();

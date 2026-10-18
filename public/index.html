@@ -191,16 +191,15 @@
                 value="2026-10-20T12:00"
             /></label>
             <p class="muted small">
-              Начальные даты — пример из ссылки. Подтвердите точное время по правилам рынка. Переход
-              на летнее время учитывается.
+              Для рынка XTracker период выбирается автоматически по трекеру. Эти поля используются
+              для отдельного прогноза.
             </p>
             <details>
               <summary>Прогноз на отдельный день</summary>
               <label>Дата в выбранном часовом поясе<input type="date" id="target-date" /></label
               ><button id="one-day" class="button secondary wide">Выбрать сутки 00:00–00:00</button>
               <p class="muted small">
-                Для прогноза без позиций очистите ссылку на рынок. Оценка позиций имеет смысл только
-                для периода из правил.
+                Кнопка очистит ссылку на рынок и выберет отдельный суточный прогноз.
               </p>
             </details>
             <label class="checkbox"
@@ -213,18 +212,11 @@
           <section class="panel setup-panel">
             <div class="section-heading">
               <span class="step">03</span>
-              <h2>Параметры сделки</h2>
+              <h2>Расчёт вероятностей</h2>
             </div>
-            <div class="two-fields">
+            <details>
+              <summary>Дополнительные настройки оценки</summary>
               <label
-                >Бюджет на позицию, $<input
-                  type="number"
-                  id="budget"
-                  value="100"
-                  min="1"
-                  max="1000000"
-                  step="1" /></label
-              ><label
                 >Резерв расходов, %<input
                   type="number"
                   id="expenses"
@@ -233,21 +225,22 @@
                   max="50"
                   step="0.1"
               /></label>
-            </div>
-            <label
-              >Запас к вероятности, п.п.<input
-                type="number"
-                id="safety"
-                value="5"
-                min="0"
-                max="50"
-                step="0.5"
-            /></label>
-            <p class="muted small">
-              Резерв прибавляется к стоимости покупки и приближённо учитывает комиссии и прочие
-              расходы. Это не тариф Polymarket. Запас вычитается из вероятности при проверке
-              сигнала.
-            </p>
+
+              <label
+                >Запас к вероятности, п.п.<input
+                  type="number"
+                  id="safety"
+                  value="5"
+                  min="0"
+                  max="50"
+                  step="0.5"
+              /></label>
+              <p class="muted small">
+                Резерв прибавляется к стоимости покупки и приближённо учитывает комиссии и прочие
+                расходы. Это не тариф Polymarket. Запас вычитается из вероятности при проверке
+                сигнала.
+              </p>
+            </details>
             <button id="analyze" class="button primary wide">
               Рассчитать прогноз <span>→</span></button
             ><label class="checkbox refresh"
@@ -320,11 +313,40 @@
                 <span>Число публикаций за выбранный период</span><span id="model-label"></span>
               </div>
             </section>
+            <section class="panel">
+              <h2>Вероятности исходов</h2>
+              <p class="muted small">
+                Оценки модели, а не гарантии. Ошибка модели может быть больше погрешности симуляции.
+              </p>
+              <div id="outcomes"></div>
+            </section>
+            <section class="panel">
+              <h2>Куда направить бюджет</h2>
+              <label
+                >Общий бюджет, $ (необязательно)<input
+                  id="budget"
+                  type="number"
+                  min="0"
+                  max="1000000"
+                  step="1"
+                  placeholder="Например, 100"
+              /></label>
+              <p id="allocation" aria-live="polite"></p>
+              <p class="muted small">
+                Ориентир: одна лучшая позиция, четверть доли Келли с запасом к вероятности, максимум
+                25% бюджета. Остаток — в деньгах. Это осторожная эвристика, не оптимизация портфеля;
+                бюджет должен быть суммой, которую вы готовы потерять. Изменение бюджета не
+                пересчитывает прогноз.
+              </p>
+            </section>
             <section class="panel positions-panel">
               <div class="chart-heading">
                 <div>
                   <h2>Цена против вероятности</h2>
-                  <p>Расчёт покупки каждой стороны отдельно на указанный бюджет</p>
+                  <p>
+                    Сравнение сторон на одинаковой условной покупке $100; это не распределение
+                    бюджета
+                  </p>
                 </div>
                 <select id="position-filter" aria-label="Фильтр позиций">
                   <option value="all">Все позиции</option>
@@ -341,7 +363,7 @@
                       <th>ВЕРОЯТНОСТЬ</th>
                       <th>ЦЕНА ПОКУПКИ</th>
                       <th>EDGE</th>
-                      <th>EV, $</th>
+                      <th>EV на $100</th>
                       <th>ROI</th>
                       <th>ОЦЕНКА</th>
                     </tr>
