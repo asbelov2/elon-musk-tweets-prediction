@@ -11,8 +11,8 @@
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json && tsc -p tsconfig.e2e.json",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "check": "npm test && npm run format:check",
-    "start": "node dist/src/server/index.js",
-    "dev": "npm run build && concurrently -k \"tsc -p tsconfig.server.json --watch --preserveWatchOutput\" \"node dist/scripts/build.js --watch\" \"node --watch --watch-path=dist/src dist/src/server/index.js\"",
+    "start": "node --env-file-if-exists=.env dist/src/server/index.js",
+    "dev": "npm run build && concurrently -k \"tsc -p tsconfig.server.json --watch --preserveWatchOutput\" \"node dist/scripts/build.js --watch\" \"node --env-file-if-exists=.env --watch --watch-path=dist/src dist/src/server/index.js\"",
     "test:e2e": "playwright test",
     "format": "prettier --write src tests scripts public *.json *.md playwright.config.ts",
     "format:check": "prettier --check src tests scripts public *.json *.md playwright.config.ts"
