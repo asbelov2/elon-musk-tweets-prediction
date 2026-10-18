@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { Collection, CollectRequest, Market, MarketEvent, Side } from '../shared/types.js';
+import type { Market, MarketEvent, Side } from '../shared/types.js';
 import { AppError, errorMessage, ProviderError } from './errors.js';
 import { endpoint, getJson, record, remoteTransport, text, type Transport } from './http.js';
-import { DAY, HOUR, hour, iso, parseTime } from './time.js';
+import { iso } from './time.js';
 
 const levelSchema = z.object({
   price: z.number().finite().gt(0).lt(1),
@@ -205,114 +205,4 @@ export async function fetchEvent(
   );
   event.fetched_at = iso(Date.now());
   return event;
-}
-
-function postKind(post: Record<string, unknown>): string {
-  let kind = text(post.type ?? post.postType).toLowerCase();
-  const aliases: Record<string, string> = {
-    tweet: 'post',
-    original: 'post',
-    retweet: 'repost',
-    quote_tweet: 'quote',
-    'quote-tweet': 'quote',
-  };
-  kind = aliases[kind] ?? kind;
-  if (!['post', 'reply', 'repost', 'quote'].includes(kind))
-    throw new ProviderError(
-      'XTracker не указал распознаваемый тип публикации. Используйте сверенный CSV.',
-    );
-  return kind;
-}
-
-export async function collectPosts(
-  options: Pick<CollectRequest, 'days' | 'include_replies' | 'include_reposts'>,
-  transport: Transport = remoteTransport,
-  now = Date.now(),
-): Promise<Collection> {
-  const end = hour(now),
-    start = end - options.days * DAY,
-    posts = new Map<string, Record<string, unknown>>();
-  let cursor: string | undefined,
-    finished = false;
-  for (let page = 1; page <= 100; page++) {
-    const params: Record<string, string | number> = {
-      startDate: iso(start),
-      endDate: iso(end),
-      limit: 200,
-      page,
-    };
-    if (cursor) params.cursor = cursor;
-    const raw = await getJson(
-      endpoint('https://xtracker.polymarket.com/api/users/elonmusk/posts', params),
-      transport,
-    );
-    const body = record(raw) ? (raw.data ?? raw) : raw,
-      rows = record(body) ? body.posts : body;
-    if (!Array.isArray(rows))
-      throw new ProviderError('Неизвестный формат XTracker. Используйте импорт CSV.');
-    if (rows.length && rows.every((p) => record(p) && !p.type && !p.postType))
-      throw new ProviderError(
-        'Текущий API XTracker не передаёт типы публикаций. Используйте API X или CSV, сверенный с Post Counter.',
-      );
-    let added = 0;
-    for (const row of rows) {
-      if (!record(row)) throw new ProviderError('Неверная запись XTracker');
-      const pid = text(row.id) || text(row.platformId);
-      if (!pid) throw new ProviderError('Нет ID публикации: невозможно убрать дубликаты');
-      if (!posts.has(pid)) {
-        added++;
-        posts.set(pid, row);
-      }
-    }
-    const meta =
-      (record(body) ? body.pagination : undefined) ??
-      (record(raw) ? raw.pagination : undefined) ??
-      {};
-    if (!record(meta)) throw new ProviderError('Неизвестная структура пагинации XTracker');
-    if (
-      !rows.length ||
-      meta.hasMore === false ||
-      (typeof meta.totalPages === 'number' && page >= meta.totalPages)
-    ) {
-      finished = true;
-      break;
-    }
-    if (!added)
-      throw new ProviderError('Источник повторяет страницы: полнота истории не подтверждена');
-    if (meta.nextCursor) {
-      if (typeof meta.nextCursor !== 'string' || meta.nextCursor === cursor)
-        throw new ProviderError('XTracker повторяет курсор или вернул неверную пагинацию');
-      cursor = meta.nextCursor;
-    }
-  }
-  if (!finished)
-    throw new ProviderError('Достигнут предел страниц XTracker: результат не импортирован');
-  const counts = new Map<number, number>(
-    Array.from({ length: options.days * 24 }, (_, i) => [start + i * HOUR, 0]),
-  );
-  let retained = 0;
-  for (const post of posts.values()) {
-    const dt = parseTime(text(post.createdAt ?? post.created_at)),
-      kind = postKind(post);
-    if (
-      (kind === 'reply' && !options.include_replies) ||
-      (kind === 'repost' && !options.include_reposts)
-    )
-      continue;
-    if (dt >= start && dt < end) {
-      const t = hour(dt);
-      counts.set(t, counts.get(t)! + 1);
-      retained++;
-    }
-  }
-  if (!retained)
-    throw new ProviderError('Источник вернул пустую историю; нулевое покрытие не сохранено');
-  return {
-    rows: [...counts],
-    posts: retained,
-    start: iso(start),
-    end: iso(end),
-    notice:
-      'Проверьте полноту всего интервала и соответствие типов публикаций правилам рынка. API XTracker не гарантирует полноту истории.',
-  };
 }

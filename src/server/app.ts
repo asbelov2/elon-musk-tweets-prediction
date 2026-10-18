@@ -13,20 +13,30 @@ import type {
   Dataset,
   MarketEvent,
   Status,
+  TrackerReport,
 } from '../shared/types.js';
 import { demoEvent, demoHours } from './demo.js';
 import { AppError } from './errors.js';
 import { runForecast } from './forecast-runner.js';
 import type { Transport } from './http.js';
-import { collectPosts, eventSchema, fetchEvent, slugFrom } from './providers.js';
+import { eventSchema, fetchEvent, slugFrom } from './providers.js';
 import { Store, readCsv } from './storage.js';
-import { HOUR, iso, localTime } from './time.js';
+import { HOUR, iso, localTime, parseTime } from './time.js';
 import { evaluate } from './trading.js';
 import { collectX, credentialsPresent, type Credentials } from './x-api.js';
+import {
+  assertTrackerPeriod,
+  collectTracker,
+  fetchTrackerCounter,
+  TRACKER_SOURCE,
+  trackerReportSchema,
+} from './xtracker.js';
 
 const AnalyzeBody = Type.Object(
   {
-    dataset: Type.Union([Type.Literal('live'), Type.Literal('demo')], { default: 'live' }),
+    dataset: Type.Union([Type.Literal('live'), Type.Literal('demo'), Type.Literal('xtracker')], {
+      default: 'xtracker',
+    }),
     event_url: Type.String({ default: '', maxLength: 500 }),
     start: Type.String({ maxLength: 40 }),
     end: Type.String({ maxLength: 40 }),
@@ -40,7 +50,8 @@ const AnalyzeBody = Type.Object(
 );
 const CollectBody = Type.Object(
   {
-    source: Type.Union([Type.Literal('x'), Type.Literal('xtracker')], { default: 'x' }),
+    source: Type.Union([Type.Literal('x'), Type.Literal('xtracker')], { default: 'xtracker' }),
+    event_url: Type.String({ default: '', maxLength: 500 }),
     mode: Type.Union([Type.Literal('archive'), Type.Literal('timeline')], { default: 'archive' }),
     days: Type.Integer({ default: 90, minimum: 15, maximum: 120 }),
     include_replies: Type.Boolean({ default: false }),
@@ -62,6 +73,7 @@ interface Staged {
   created: number;
   rows: Collection['rows'];
   config: CollectRequest;
+  tracker?: TrackerReport;
 }
 
 export async function createApp(options: AppOptions = {}) {
@@ -126,7 +138,7 @@ export async function createApp(options: AppOptions = {}) {
     { schema: { summary: 'Покрытие истории и наличие ключа X' } },
     async () => {
       const result = {} as Status;
-      for (const dataset of ['live', 'demo'] as Dataset[]) {
+      for (const dataset of ['live', 'demo', 'xtracker'] as Dataset[]) {
         const { data, sources } = store.load(dataset),
           times = [...data.keys()];
         result[dataset] = {
@@ -162,9 +174,18 @@ export async function createApp(options: AppOptions = {}) {
   );
   app.get(
     '/api/export',
-    { schema: { summary: 'Экспорт реальной почасовой истории' } },
-    async (_r, reply) => {
-      const { data } = store.load();
+    {
+      schema: {
+        summary: 'Экспорт реальной почасовой истории',
+        querystring: Type.Object({
+          dataset: Type.Union([Type.Literal('live'), Type.Literal('xtracker')], {
+            default: 'live',
+          }),
+        }),
+      },
+    },
+    async (request, reply) => {
+      const { data } = store.load(request.query.dataset);
       return reply
         .header('Content-Disposition', 'attachment; filename=tweets-hourly.csv')
         .type('text/csv; charset=utf-8')
@@ -201,12 +222,17 @@ export async function createApp(options: AppOptions = {}) {
       const collected =
         config.source === 'x'
           ? await collectX(config, options.transport, now(), env)
-          : await collectPosts(config, options.transport, now());
+          : await collectTracker(config, options.transport, now());
       for (const [key, value] of staged)
         if (performance.now() - value.created > 1_800_000) staged.delete(key);
       if (staged.size >= 10) staged.delete(staged.keys().next().value!);
       const preview_id = randomUUID();
-      staged.set(preview_id, { created: performance.now(), rows: collected.rows, config });
+      staged.set(preview_id, {
+        created: performance.now(),
+        rows: collected.rows,
+        config,
+        tracker: collected.tracker,
+      });
       const { rows, ...summary } = collected;
       return { ...summary, preview_id, hours: rows.length };
     },
@@ -229,10 +255,45 @@ export async function createApp(options: AppOptions = {}) {
       if (!request.body.coverage_confirmed)
         throw new AppError('Подтвердите полноту источника и правила');
       const config = item.config,
-        source = `${config.source}:${config.source === 'x' ? config.mode : 'public'}:replies=${Number(config.include_replies)}:reposts=${Number(config.include_reposts)}`;
-      const imported_hours = store.saveHours(item.rows, 'live', source, now());
+        source =
+          config.source === 'xtracker'
+            ? TRACKER_SOURCE
+            : `x:${config.mode}:replies=${Number(config.include_replies)}:reposts=${Number(config.include_reposts)}`;
+      const dataset = config.source === 'xtracker' ? 'xtracker' : 'live';
+      const imported_hours = store.saveHours(
+        item.rows,
+        dataset,
+        source,
+        now(),
+        item.tracker
+          ? { key: 'tracker:import:' + item.tracker.slug, value: item.tracker }
+          : undefined,
+      );
       staged.delete(request.body.preview_id);
-      return { imported_hours };
+      return { imported_hours, dataset };
+    },
+  );
+  app.get(
+    '/api/xtracker',
+    {
+      schema: {
+        summary: 'Post Counter и границы трекинга XTracker',
+        querystring: Type.Object({ url: Type.String({ maxLength: 500 }) }),
+      },
+    },
+    async (request) => {
+      const slug = slugFrom(request.query.url),
+        cached = trackerReportSchema.safeParse(
+          store.getMetadata('tracker:' + slug) ?? store.getMetadata('tracker:import:' + slug),
+        );
+      const { report } = await fetchTrackerCounter(
+        slug,
+        options.transport,
+        now(),
+        cached.success ? cached.data.tracking_id : undefined,
+      );
+      report.as_of = iso(now());
+      return report;
     },
   );
   app.post(
@@ -240,15 +301,38 @@ export async function createApp(options: AppOptions = {}) {
     { schema: { summary: 'Прогноз и оценка загруженного снимка', body: AnalyzeBody } },
     async (request): Promise<Analysis> => {
       const body = request.body,
-        { data, sources } = store.load(body.dataset),
         start = localTime(body.start, body.timezone),
         end = localTime(body.end, body.timezone);
+      let tracker: TrackerReport | undefined;
+      if (body.dataset === 'xtracker' && body.event_url) {
+        const slug = slugFrom(body.event_url),
+          cached = trackerReportSchema.safeParse(
+            store.getMetadata('tracker:' + slug) ?? store.getMetadata('tracker:import:' + slug),
+          );
+        const fresh = await fetchTrackerCounter(
+          slug,
+          options.transport,
+          now(),
+          cached.success ? cached.data.tracking_id : undefined,
+        );
+        tracker = fresh.report;
+        tracker.as_of = iso(now());
+        assertTrackerPeriod(tracker, start, end);
+        // Refresh explicitly supplied complete buckets, including late tracker corrections.
+        if (fresh.rows.length)
+          store.saveHours(fresh.rows, 'xtracker', TRACKER_SOURCE, now(), {
+            key: 'tracker:' + slug,
+            value: tracker,
+          });
+      }
+      const { data, sources } = store.load(body.dataset);
       const { draws, result } = await runForecast({
         rows: [...data],
         start,
         end,
         timezone: body.timezone,
         now: now(),
+        anchor: tracker ? { count: tracker.count, as_of: parseTime(tracker.as_of) } : undefined,
       });
       const analysis: Analysis = {
         ...result,
@@ -259,7 +343,15 @@ export async function createApp(options: AppOptions = {}) {
         generated_at: iso(now()),
         positions: [],
         event: null,
+        ...(tracker ? { tracker } : {}),
       };
+      if (tracker) {
+        result.warnings.push(...tracker.warnings);
+        if (!tracker.sync_ok) {
+          result.fresh = false;
+          analysis.fresh = false;
+        }
+      }
       let market: MarketEvent;
       if (body.dataset === 'demo') {
         const demo = demoEvent(now());
@@ -286,13 +378,23 @@ export async function createApp(options: AppOptions = {}) {
         result.warnings.push(
           'История API X может расходиться с Post Counter: удалённые публикации и ответы в основной ленте требуют отдельной сверки по правилам рынка.',
         );
+      const trackerRequired = /xtracker|post counter/i.test(market.description);
+      const trustedHistory =
+        body.dataset === 'xtracker' && sources.every((source) => source === TRACKER_SOURCE);
+      if (trackerRequired && !trustedHistory)
+        result.warnings.push(
+          'Этот рынок разрешается по Post Counter. Для сигналов выберите отдельную историю XTracker; API X / CSV остаются дополнительными источниками.',
+        );
       analysis.positions = evaluate(
         draws,
         market,
         body.budget,
         body.expense_bps,
         body.safety_pp,
-        body.rules_confirmed && result.fresh,
+        body.rules_confirmed &&
+          result.fresh &&
+          (!trackerRequired || trustedHistory) &&
+          (body.dataset !== 'xtracker' || Boolean(tracker?.verified && tracker.sync_ok)),
         now(),
       );
       let hits = 0;

@@ -1,12 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  bounds,
-  collectPosts,
-  fetchEvent,
-  normalizeEvent,
-  slugFrom,
-} from '../src/server/providers.js';
+import { bounds, fetchEvent, normalizeEvent, slugFrom } from '../src/server/providers.js';
 import { collectX, credentialsPresent } from '../src/server/x-api.js';
 import type { RemoteResponse, Transport } from '../src/server/http.js';
 import { DAY, HOUR, hour, iso } from '../src/server/time.js';
@@ -240,63 +234,5 @@ test('Repeated X cursors and malformed pages are rejected', async () => {
   await assert.rejects(
     collectX(options, async () => response({ data: [{ id: '1' }] }), now, env),
     /структура/,
-  );
-});
-test('XTracker contract pages deduplicate and filter before staging zeros', async () => {
-  const transport: Transport = async (url) => {
-    const page = Number(url.searchParams.get('page'));
-    const posts =
-      page === 1
-        ? [
-            { id: '1', createdAt: iso(t), type: 'tweet' },
-            { id: '2', createdAt: iso(t), type: 'reply' },
-          ]
-        : [
-            { id: '1', createdAt: iso(t), type: 'tweet' },
-            { id: '3', createdAt: iso(t), type: 'retweet' },
-          ];
-    return response({ data: { posts, pagination: { totalPages: 2 } } });
-  };
-  const result = await collectPosts({ ...options, days: 15 }, transport, now);
-  assert.equal(result.posts, 2);
-  assert.equal(result.rows.length, 360);
-  assert.equal(new Map(result.rows).get(t), 2);
-});
-test('Observed XTracker response without types is not guessed', async () => {
-  await assert.rejects(
-    collectPosts(
-      options,
-      async () =>
-        response({
-          success: true,
-          data: [{ id: 'tracker', platformId: '123', createdAt: iso(t), content: 'post' }],
-        }),
-      now,
-    ),
-    /не передаёт типы/,
-  );
-});
-test('XTracker repeated pages and unknown publication types are rejected', async () => {
-  await assert.rejects(
-    collectPosts(
-      options,
-      async () => response({ data: [{ id: '1', createdAt: iso(t), type: 'tweet' }] }),
-      now,
-    ),
-    /повторяет/,
-  );
-  await assert.rejects(
-    collectPosts(
-      options,
-      async () =>
-        response({
-          data: {
-            posts: [{ id: '1', createdAt: iso(t), type: 'unknown' }],
-            pagination: { hasMore: false },
-          },
-        }),
-      now,
-    ),
-    /тип публикации/,
   );
 });

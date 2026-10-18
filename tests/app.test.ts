@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import type { Analysis, CollectionPreview, DemoEvent, Status } from '../src/shared/types.js';
+import type {
+  Analysis,
+  CollectionPreview,
+  DemoEvent,
+  Status,
+  MarketEvent,
+} from '../src/shared/types.js';
 import { createApp } from '../src/server/app.js';
 import { demoHours } from '../src/server/demo.js';
 import type { Transport } from '../src/server/http.js';
 import { readCsv, Store } from '../src/server/storage.js';
 import { DAY, HOUR, hour, iso } from '../src/server/time.js';
+import { trackerFixture, SLUG } from './fixtures/xtracker.js';
 
 const now = Date.parse('2026-10-18T12:20:00Z');
 async function setup(t: TestContext, transport?: Transport) {
@@ -128,21 +135,13 @@ test('Import/export and a real-dataset forecast preserve hourly counts', async (
   assert.deepEqual(response.json<Analysis>().positions, []);
 });
 test('Collection preview never writes data before explicit confirmation', async (t) => {
-  const transport: Transport = async () => ({
-    status: 200,
-    json: async () => ({
-      data: {
-        posts: [{ id: '1', createdAt: iso(hour(now) - HOUR), type: 'tweet' }],
-        pagination: { hasMore: false },
-      },
-    }),
-  });
+  const { transport } = trackerFixture(now);
   const { app, store } = await setup(t, transport);
   const preview = (
     await app.inject({
       method: 'POST',
       url: '/api/collect',
-      payload: { source: 'xtracker', days: 15 },
+      payload: { source: 'xtracker', days: 15, event_url: SLUG },
     })
   ).json<CollectionPreview>();
   assert.ok(preview.preview_id);
@@ -160,7 +159,8 @@ test('Collection preview never writes data before explicit confirmation', async 
     payload: { preview_id: preview.preview_id, coverage_confirmed: true },
   });
   assert.equal(confirmed.statusCode, 200, confirmed.body);
-  assert.equal(store.load().data.size, 360);
+  assert.equal(store.load('xtracker').data.size, 360);
+  assert.equal(store.load('live').data.size, 0);
   assert.equal(
     (
       await app.inject({
@@ -186,6 +186,89 @@ test('X collection without a key cannot make metered network calls', async (t) =
   assert.equal(response.statusCode, 400);
   assert.match(response.json<{ detail: string }>().detail, /X_BEARER_TOKEN/);
   assert.equal(calls, 0);
+});
+test('XTracker workflow anchors Post Counter, isolates history and blocks signals on sync error', async (t) => {
+  const f = trackerFixture(now),
+    { app, store } = await setup(t, f.transport);
+  const previewResponse = await app.inject({
+    method: 'POST',
+    url: '/api/collect',
+    payload: {
+      source: 'xtracker',
+      days: 30,
+      event_url: SLUG,
+      include_replies: false,
+      include_reposts: false,
+    },
+  });
+  assert.equal(previewResponse.statusCode, 200, previewResponse.body);
+  const preview = previewResponse.json<CollectionPreview>();
+  await app.inject({
+    method: 'POST',
+    url: '/api/collect/confirm',
+    payload: { preview_id: preview.preview_id, coverage_confirmed: true },
+  });
+  const event = (await app.inject('/api/event?url=' + SLUG)).json<MarketEvent>();
+  for (const market of event.markets)
+    for (const book of Object.values(market.books)) book.fetched_at = iso(now);
+  store.snapshot(SLUG, event);
+  const payload = {
+    dataset: 'xtracker',
+    event_url: SLUG,
+    start: iso(f.start),
+    end: iso(f.end),
+    timezone: 'America/New_York',
+    rules_confirmed: true,
+  };
+  const response = await app.inject({ method: 'POST', url: '/api/analyze', payload });
+  assert.equal(response.statusCode, 200, response.body);
+  const result = response.json<Analysis>();
+  assert.equal(result.current_count, f.detail.stats.total);
+  assert.equal(result.tracker?.verified, true);
+  assert.equal(result.fresh, true);
+  assert.ok(result.positions.some((p) => p.signal));
+  assert.equal(store.load('live').data.size, 0);
+  f.profile.lastSyncError = iso(now);
+  const failed = (
+    await app.inject({ method: 'POST', url: '/api/analyze', payload })
+  ).json<Analysis>();
+  assert.equal(failed.fresh, false);
+  assert.equal(failed.tracker?.sync_ok, false);
+  assert.ok(failed.positions.every((p) => !p.signal));
+  const wrong = await app.inject({
+    method: 'POST',
+    url: '/api/analyze',
+    payload: { ...payload, end: iso(f.end + HOUR) },
+  });
+  assert.equal(wrong.statusCode, 400);
+  assert.match(wrong.json<{ detail: string }>().detail, /Период/);
+  const exported = await app.inject('/api/export?dataset=xtracker');
+  assert.equal(readCsv(exported.body).length, 720);
+});
+test('A manual rules checkbox cannot make API X/CSV history authoritative for a Post Counter market', async (t) => {
+  const f = trackerFixture(now),
+    { app, store } = await setup(t, f.transport);
+  store.saveHours(demoHours(now), 'live', 'csv', now);
+  const event = (await app.inject('/api/event?url=' + SLUG)).json<MarketEvent>();
+  for (const market of event.markets)
+    for (const book of Object.values(market.books)) book.fetched_at = iso(now);
+  store.snapshot(SLUG, event);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/analyze',
+    payload: {
+      dataset: 'live',
+      event_url: SLUG,
+      start: iso(f.start),
+      end: iso(f.end),
+      timezone: 'UTC',
+      rules_confirmed: true,
+    },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const result = response.json<Analysis>();
+  assert.ok(result.positions.every((p) => !p.signal));
+  assert.ok(result.warnings.some((w) => w.includes('отдельную историю XTracker')));
 });
 test('Demo window mismatch gives a forecast without market positions', async (t) => {
   const { app } = await setup(t),

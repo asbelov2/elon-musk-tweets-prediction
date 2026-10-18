@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { trackerFixture, SLUG } from '../fixtures/xtracker.js';
+import { collectTracker } from '../../src/server/xtracker.js';
 
 test('Demo, charts, position filters and parameter invalidation', async ({ page }) => {
   const errors: string[] = [];
@@ -30,6 +32,7 @@ test('CSV import, forecast without a market and CSV export', async ({ page }) =>
       (_, i) => `${new Date(end - (40 * 24 - i) * 3_600_000).toISOString()},${i % 7}`,
     ).join('\n');
   await page.goto('/');
+  await page.locator('#tab-csv').click();
   await page
     .locator('#csv-file')
     .setInputFiles({ name: 'history.csv', mimeType: 'text/csv', buffer: Buffer.from(content) });
@@ -56,6 +59,7 @@ test('X source controls and offline API documentation', async ({ page }) => {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
   await page.locator('#tab-tracker').click();
+  await page.locator('#collector-source').selectOption('x');
   await expect(page.locator('#x-options')).toBeVisible();
   await expect(page.locator('#x-key-status')).toContainText('не настроен');
   await page.locator('#collector-source').selectOption('xtracker');
@@ -64,7 +68,7 @@ test('X source controls and offline API documentation', async ({ page }) => {
   await page.locator('#x-mode').selectOption('timeline');
   await expect(page.locator('#x-options')).toBeVisible();
   await page.goto('/api/docs');
-  await expect(page.locator('#api-paths summary')).toHaveCount(9);
+  await expect(page.locator('#api-paths summary')).toHaveCount(10);
   expect(await page.locator('#api-schemas summary').count()).toBeGreaterThanOrEqual(2);
   expect(errors).toEqual([]);
 });
@@ -79,4 +83,70 @@ test('Dashboard fits mobile and desktop viewports', async ({ page }) => {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   }
+});
+
+test('XTracker preview, isolated history and authoritative period controls', async ({ page }) => {
+  const fixture = trackerFixture(),
+    collection = await collectTracker(
+      { days: 30, event_url: SLUG },
+      fixture.transport,
+      fixture.now,
+    ),
+    report = collection.tracker!;
+  let saved = false;
+  const empty = { hours: 0, posts: 0, sources: [], start: null, end: null };
+  await page.route('**/api/status', (route) =>
+    route.fulfill({
+      json: {
+        live: empty,
+        demo: empty,
+        xtracker: saved
+          ? {
+              hours: collection.rows.length,
+              posts: collection.posts,
+              sources: ['xtracker:post-counter:v1'],
+              start: collection.start,
+              end: collection.end,
+            }
+          : empty,
+        x_api: { credentials_present: false },
+      },
+    }),
+  );
+  await page.route('**/api/collect', (route) =>
+    route.fulfill({
+      json: {
+        posts: collection.posts,
+        start: collection.start,
+        end: collection.end,
+        notice: collection.notice,
+        tracker: report,
+        preview_id: 'preview',
+        hours: collection.rows.length,
+      },
+    }),
+  );
+  await page.route('**/api/collect/confirm', (route) => {
+    saved = true;
+    return route.fulfill({ json: { imported_hours: collection.rows.length, dataset: 'xtracker' } });
+  });
+  await page.route('**/api/xtracker?*', (route) => route.fulfill({ json: report }));
+  await page.goto('/');
+  await expect(page.locator('#history-source')).toHaveValue('xtracker');
+  await page.locator('#tab-tracker').click();
+  await expect(page.locator('#collector-source')).toHaveValue('xtracker');
+  await expect(page.locator('#x-filters')).toBeHidden();
+  await page.locator('#collect').click();
+  await expect(page.locator('#collection-preview')).toBeVisible();
+  await expect(page.locator('#preview-text')).toContainText('Post Counter');
+  await expect(page.locator('#tracker-summary')).toContainText(String(report.count));
+  await expect(page.locator('#start')).toHaveValue(report.local_start);
+  await expect(page.locator('#end')).toHaveValue(report.local_end);
+  await page.locator('#tracker-confirm').check();
+  await page.locator('#confirm-collect').click();
+  await expect(page.locator('#message')).toContainText('Сохранено 720');
+  await expect(page.locator('#data-summary')).toContainText('xtracker:post-counter:v1');
+  await page.locator('#start').fill('2026-10-14T12:00');
+  await page.locator('#sync-tracker').click();
+  await expect(page.locator('#start')).toHaveValue(report.local_start);
 });

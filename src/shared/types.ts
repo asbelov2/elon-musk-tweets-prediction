@@ -1,4 +1,4 @@
-export type Dataset = 'live' | 'demo';
+export type Dataset = 'live' | 'demo' | 'xtracker';
 export type Side = 'yes' | 'no';
 /** UTC epoch milliseconds, count. Missing hours are unknown, never zero. */
 export type HourRow = [number, number];
@@ -102,6 +102,7 @@ export interface Analysis extends ForecastSummary {
   generated_at: string;
   positions: Position[];
   event: MarketEvent | null;
+  tracker?: TrackerReport;
 }
 export interface AnalyzeRequest {
   dataset: Dataset;
@@ -120,6 +121,7 @@ export interface CollectRequest {
   days: number;
   include_replies: boolean;
   include_reposts: boolean;
+  event_url?: string;
 }
 export interface Collection {
   rows: HourRow[];
@@ -127,6 +129,7 @@ export interface Collection {
   start: string;
   end: string;
   notice: string;
+  tracker?: TrackerReport;
 }
 export type CollectionPreview = Omit<Collection, 'rows'> & { preview_id: string; hours: number };
 export interface DataStatus {
@@ -139,5 +142,29 @@ export interface DataStatus {
 export interface Status {
   live: DataStatus;
   demo: DataStatus;
+  xtracker: DataStatus;
   x_api: { credentials_present: boolean };
+}
+export interface CounterAnchor {
+  count: number;
+  as_of: number;
+}
+export interface TrackerReport {
+  tracking_id: string;
+  slug: string;
+  title: string;
+  start: string;
+  end: string;
+  local_start: string;
+  local_end: string;
+  as_of: string;
+  count: number;
+  completed_count: number;
+  last_sync: string | null;
+  last_sync_error: string | null;
+  sync_ok: boolean;
+  verified: boolean;
+  warnings: string[];
+  export_records?: number;
+  history_hours?: number;
 }

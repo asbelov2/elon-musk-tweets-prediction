@@ -7,6 +7,7 @@ import type {
   MarketEvent,
   Position,
   Status,
+  TrackerReport,
 } from '../shared/types.js';
 type InputId =
   | 'csv-file'
@@ -24,7 +25,7 @@ type InputId =
   | 'expenses'
   | 'safety'
   | 'auto-refresh';
-type SelectId = 'timezone' | 'position-filter' | 'collector-source' | 'x-mode';
+type SelectId = 'timezone' | 'position-filter' | 'collector-source' | 'x-mode' | 'history-source';
 type ButtonId =
   | 'demo'
   | 'demo-empty'
@@ -35,11 +36,12 @@ type ButtonId =
   | 'load-market'
   | 'analyze'
   | 'one-day';
+type TrackerButton = 'sync-tracker';
 type ElementFor<Id extends string> = Id extends InputId
   ? HTMLInputElement
   : Id extends SelectId
     ? HTMLSelectElement
-    : Id extends ButtonId
+    : Id extends ButtonId | TrackerButton
       ? HTMLButtonElement
       : Id extends 'market-rules'
         ? HTMLDetailsElement
@@ -56,7 +58,18 @@ const state: {
   preview: string | null;
   busy: boolean;
   version: number;
-} = { dataset: 'live', result: null, event: null, preview: null, busy: false, version: 0 };
+  realDataset: 'live' | 'xtracker';
+  tracker: TrackerReport | null;
+} = {
+  dataset: 'xtracker',
+  result: null,
+  event: null,
+  preview: null,
+  busy: false,
+  version: 0,
+  realDataset: 'xtracker',
+  tracker: null,
+};
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 const number = (n: number | null | undefined, digits = 0) =>
@@ -134,6 +147,9 @@ function invalidate() {
 }
 function setMode(dataset: Dataset) {
   state.dataset = dataset;
+  if (dataset !== 'demo') state.realDataset = dataset;
+  $('history-source').value = state.realDataset;
+  if (dataset !== 'xtracker') $('tracker-counter').hidden = true;
   invalidate();
   $('mode').textContent = dataset === 'demo' ? 'ДЕМОНСТРАЦИЯ' : 'РЕАЛЬНЫЕ ДАННЫЕ';
   $('mode').classList.toggle('is-demo', dataset === 'demo');
@@ -143,6 +159,7 @@ function setMode(dataset: Dataset) {
 async function status() {
   const all = await api<Status>('/api/status');
   const data = all[state.dataset];
+  $('export-history').setAttribute('href', '/api/export?dataset=' + state.realDataset);
   $('x-key-status').textContent = all.x_api?.credentials_present
     ? 'Bearer Token: настроен (доступ проверяется при сборе)'
     : 'Bearer Token: не настроен. Добавьте X_BEARER_TOKEN в секреты среды.';
@@ -150,6 +167,27 @@ async function status() {
   $('data-summary').textContent = data.hours
     ? `${number(data.hours)} часов · ${number(data.posts)} публикаций\n${stamp(data.start)} → ${stamp(data.end)}\n${data.sources.join(', ')}`
     : 'Импортируйте историю или включите демо.';
+}
+function showTracker(report: TrackerReport, applyPeriod = false) {
+  state.tracker = report;
+  $('tracker-counter').hidden = false;
+  $('tracker-summary').textContent =
+    `${number(report.count)} публикаций · снимок ${stamp(report.as_of)}\nПериод: ${stamp(report.start)} → ${stamp(report.end)}\nПоследняя успешная синхронизация: ${stamp(report.last_sync)}${report.export_records ? `\nЭкспорт сверён: ${number(report.export_records)} уникальных записей` : ''}\n${report.warnings.join('\n')}`;
+  if (applyPeriod) {
+    $('start').value = report.local_start;
+    $('end').value = report.local_end;
+    $('timezone').value = 'America/New_York';
+    $('rules-confirm').checked = false;
+    invalidate();
+  }
+}
+async function loadTrackerWindow() {
+  invalidate();
+  $('tracker-counter').hidden = true;
+  const report = await api<TrackerReport>(
+    '/api/xtracker?url=' + encodeURIComponent($('event-url').value),
+  );
+  showTracker(report, true);
 }
 function showEvent(event: MarketEvent) {
   state.event = event;
@@ -180,7 +218,7 @@ function params(): AnalyzeRequest {
 async function runAnalysis(refreshMarket = true) {
   const body = params(),
     version = state.version;
-  if (state.dataset === 'live' && body.event_url && refreshMarket) {
+  if (state.dataset !== 'demo' && body.event_url && refreshMarket) {
     const e = await api<MarketEvent>('/api/event?url=' + encodeURIComponent(body.event_url));
     if (version !== state.version) return;
     showEvent(e);
@@ -281,9 +319,9 @@ function renderPositions() {
   body.replaceChildren();
   const filter = $('position-filter').value;
   const stale =
-    r.dataset === 'live' && r.event && Date.now() - Date.parse(r.event.fetched_at) > 120000;
+    r.dataset !== 'demo' && r.event && Date.now() - Date.parse(r.event.fetched_at) > 120000;
   const expired = (p: Position) =>
-    r.dataset === 'live' &&
+    r.dataset !== 'demo' &&
     (!p.book_fetched_at || Date.now() - Date.parse(p.book_fetched_at) > 120000);
   const rows = r.positions.filter(
     (p) => filter === 'all' || (filter === 'signals' ? p.signal && !expired(p) : p.side === filter),
@@ -350,6 +388,8 @@ function renderPositions() {
     : 'EV = вероятность × число акций − стоимость − резерв расходов. Цена покупки — средняя по доступным asks. Наведите на цену и оценку, чтобы увидеть расчёт и ограничения.';
 }
 function render(r: Analysis) {
+  if (r.tracker) showTracker(r.tracker);
+  $('current-count-label').textContent = r.tracker ? 'Post Counter · XTracker' : 'Уже учтено';
   $('empty-state').hidden = true;
   $('result-content').hidden = false;
   $('result-title').textContent =
@@ -359,7 +399,7 @@ function render(r: Analysis) {
   $('stat-current').textContent = number(r.current_count);
   $('stat-mean').textContent = number(r.mean, 1);
   $('stat-range').textContent = `${number(r.low)}–${number(r.high)}`;
-  $('stat-cutoff').textContent = `История до ${stamp(r.cutoff)}`;
+  $('stat-cutoff').textContent = `${r.tracker ? 'Счётчик на' : 'История до'} ${stamp(r.cutoff)}`;
   $('warnings').replaceChildren();
   for (const text of r.warnings) {
     const p = document.createElement('div');
@@ -398,7 +438,7 @@ $('demo').addEventListener('click', () => demo($('demo')));
 $('demo-empty').addEventListener('click', () => demo($('demo-empty')));
 $('go-live').addEventListener('click', () =>
   action($('go-live'), async () => {
-    setMode('live');
+    setMode(state.realDataset);
     $('rules-confirm').checked = false;
     state.event = null;
     $('event-title').textContent = 'Рынок ещё не загружен';
@@ -452,8 +492,10 @@ $('collect').addEventListener('click', () =>
       days: Number($('history-days').value),
       include_replies: $('include-replies').checked,
       include_reposts: $('include-reposts').checked,
+      event_url: $('event-url').value,
     });
     state.preview = r.preview_id;
+    if (r.tracker) showTracker(r.tracker, true);
     $('collection-preview').hidden = false;
     $('tracker-confirm').checked = false;
     $('preview-text').textContent =
@@ -463,13 +505,13 @@ $('collect').addEventListener('click', () =>
 $('confirm-collect').addEventListener('click', () =>
   action($('confirm-collect'), async () => {
     if (!state.preview) throw new Error('Сначала соберите историю.');
-    const r = await api<{ imported_hours: number }>('/api/collect/confirm', {
+    const r = await api<{ imported_hours: number; dataset: Dataset }>('/api/collect/confirm', {
       preview_id: state.preview,
       coverage_confirmed: $('tracker-confirm').checked,
     });
     state.preview = null;
     $('collection-preview').hidden = true;
-    setMode('live');
+    setMode(r.dataset);
     $('rules-confirm').checked = false;
     await status();
     message(`Сохранено ${number(r.imported_hours)} часов.`, 'success');
@@ -477,18 +519,24 @@ $('confirm-collect').addEventListener('click', () =>
 );
 $('load-market').addEventListener('click', () =>
   action($('load-market'), async () => {
-    if (state.dataset === 'demo') setMode('live');
+    if (state.dataset === 'demo') setMode(state.realDataset);
     else invalidate();
     $('rules-confirm').checked = false;
     const r = await api<MarketEvent>('/api/event?url=' + encodeURIComponent($('event-url').value));
     showEvent(r);
+    if (state.dataset === 'xtracker') await loadTrackerWindow();
     await status();
     message('Рынок загружен. Проверьте правила, период и типы публикаций.', 'success');
   }),
 );
 $('analyze').addEventListener('click', () =>
   action($('analyze'), async () => {
-    await runAnalysis();
+    try {
+      await runAnalysis();
+    } catch (error) {
+      invalidate();
+      throw error;
+    }
   }),
 );
 $('position-filter').addEventListener('change', renderPositions);
@@ -538,6 +586,7 @@ status().catch((e) => message(e.message, 'error'));
 
 $('collector-source').addEventListener('change', () => {
   $('x-options').hidden = $('collector-source').value !== 'x';
+  $('x-filters').hidden = $('collector-source').value !== 'x';
   state.preview = null;
   $('collection-preview').hidden = true;
 });
@@ -546,3 +595,9 @@ for (const id of ['x-mode', 'history-days', 'include-replies', 'include-reposts'
     state.preview = null;
     $('collection-preview').hidden = true;
   });
+$('sync-tracker').addEventListener('click', () => action($('sync-tracker'), loadTrackerWindow));
+$('history-source').addEventListener('change', () => {
+  setMode($('history-source').value === 'xtracker' ? 'xtracker' : 'live');
+  $('rules-confirm').checked = false;
+  void status().catch((error) => message(errorText(error), 'error'));
+});

@@ -55,11 +55,19 @@
             <div class="data-summary" id="data-summary">
               Импортируйте историю или включите демо.
             </div>
+            <label
+              >История для прогноза<select id="history-source">
+                <option value="xtracker">XTracker · основной источник рынка</option>
+                <option value="live">API X / CSV · дополнительная история</option>
+              </select></label
+            >
             <div class="source-tabs" role="tablist" aria-label="Источник истории">
-              <button class="selected" id="tab-csv" role="tab" aria-selected="true">CSV</button
-              ><button id="tab-tracker" role="tab" aria-selected="false">API X / XTracker</button>
+              <button id="tab-csv" role="tab" aria-selected="false">CSV</button
+              ><button class="selected" id="tab-tracker" role="tab" aria-selected="true">
+                API X / XTracker
+              </button>
             </div>
-            <div id="csv-panel">
+            <div id="csv-panel" hidden>
               <label class="upload" for="csv-file"
                 ><span class="upload-icon">↑</span><strong>Выберите CSV-файл</strong
                 ><span>timestamp,count · до 5 МБ</span
@@ -72,14 +80,14 @@
                 ></label
               ><button class="button secondary wide" id="import">Импортировать историю</button>
             </div>
-            <div id="tracker-panel" hidden>
+            <div id="tracker-panel">
               <label
                 >Источник<select id="collector-source">
-                  <option value="x">Официальный API X</option>
-                  <option value="xtracker">Публичный XTracker (экспериментальный)</option>
+                  <option value="xtracker">XTracker · Post Counter / Export Data</option>
+                  <option value="x">Официальный API X (дополнительно)</option>
                 </select></label
               >
-              <div id="x-options">
+              <div id="x-options" hidden>
                 <label
                   >Доступ API X<select id="x-mode">
                     <option value="archive">Полный архив · search/all</option>
@@ -94,8 +102,9 @@
                 </p>
               </div>
               <p class="muted small">
-                XTracker — экспериментальный адаптер без гарантии стабильного API. Перед сохранением
-                любого сбора требуется подтвердить полноту истории.
+                XTracker: полный Export Data сверяется с числом записей источника и Post Counter
+                выбранного события. Состав публикаций сохраняется как у трекера, без повторной
+                фильтрации ответов и репостов. Токен X для этого не нужен.
               </p>
               <label
                 >Глубина истории, дней<input
@@ -105,17 +114,21 @@
                   max="120"
                   value="90"
               /></label>
-              <div class="check-row">
-                <label class="checkbox"
-                  ><input id="include-reposts" type="checkbox" checked /><span>Репосты</span></label
-                ><label class="checkbox"
-                  ><input id="include-replies" type="checkbox" /><span>Ответы</span></label
-                >
+              <div id="x-filters" hidden>
+                <div class="check-row">
+                  <label class="checkbox"
+                    ><input id="include-reposts" type="checkbox" checked /><span
+                      >Репосты</span
+                    ></label
+                  ><label class="checkbox"
+                    ><input id="include-replies" type="checkbox" /><span>Ответы</span></label
+                  >
+                </div>
+                <p class="muted small">
+                  Обычные и цитирующие публикации включены. Сверьте состав с правилами конкретного
+                  рынка.
+                </p>
               </div>
-              <p class="muted small">
-                Обычные и цитирующие публикации включены. Сверьте состав с правилами конкретного
-                рынка.
-              </p>
               <button id="collect" class="button secondary wide">Собрать историю</button>
               <div id="collection-preview" hidden>
                 <p id="preview-text" class="muted"></p>
@@ -126,7 +139,9 @@
                 ><button id="confirm-collect" class="button secondary wide">Сохранить сбор</button>
               </div>
             </div>
-            <a class="small-link" href="/api/export">Экспорт реальной истории в CSV ↓</a>
+            <a id="export-history" class="small-link" href="/api/export?dataset=xtracker"
+              >Экспорт реальной истории в CSV ↓</a
+            >
           </section>
           <section class="panel setup-panel">
             <div class="section-heading">
@@ -148,6 +163,13 @@
               </p>
               <p id="event-resolution" class="muted"></p>
             </details>
+            <button id="sync-tracker" class="button secondary wide">
+              Сверить Post Counter и период
+            </button>
+            <div id="tracker-counter" class="notice" hidden>
+              <strong>Post Counter · XTracker</strong>
+              <p id="tracker-summary"></p>
+            </div>
             <label
               >Часовой пояс периода<select id="timezone">
                 <option value="America/New_York">Нью-Йорк · America/New_York</option>
@@ -259,7 +281,7 @@
             </div>
             <div class="stat-grid">
               <article class="stat panel">
-                <div class="stat-label">Уже учтено</div>
+                <div id="current-count-label" class="stat-label">Уже учтено</div>
                 <div id="stat-current" class="stat-value">—</div>
                 <div class="stat-foot" id="stat-cutoff"></div>
               </article>

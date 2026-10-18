@@ -1,5 +1,11 @@
 import { DateTime } from 'luxon';
-import type { Backtest, ForecastOutput, HourData, HourRow } from '../shared/types.js';
+import type {
+  Backtest,
+  CounterAnchor,
+  ForecastOutput,
+  HourData,
+  HourRow,
+} from '../shared/types.js';
 import { AppError } from './errors.js';
 import { Random } from './random.js';
 import { DAY, HOUR, hour, hoursBetween, iso, localParts } from './time.js';
@@ -110,11 +116,12 @@ export function simulate(
 ): Float64Array {
   const rng = new Random(seed),
     intensities = new Map<string, number>();
-  for (const t of hoursBetween(start, end)) {
+  for (const t of hoursBetween(hour(start), end)) {
     const local = localParts(t, zone);
+    const exposure = (Math.min(t + HOUR, end) - Math.max(t, start)) / HOUR;
     intensities.set(
       local.day,
-      (intensities.get(local.day) ?? 0) + fitted.rates[local.weekday][local.hour],
+      (intensities.get(local.day) ?? 0) + fitted.rates[local.weekday][local.hour] * exposure,
     );
   }
   const common = Float64Array.from({ length: samples }, () =>
@@ -162,6 +169,7 @@ export function forecast(
   zone: string,
   now = Date.now(),
   samples = 20_000,
+  anchor?: CounterAnchor,
 ): ForecastOutput {
   if (start !== hour(start) || end !== hour(end) || end <= start)
     throw new AppError('Границы периода должны совпадать с часами UTC; конец позже начала');
@@ -181,8 +189,21 @@ export function forecast(
     throw new AppError(
       `В периоде рынка отсутствуют ${missing.length} часов истории; первый: ${iso(missing[0])}`,
     );
+  let predictionStart = Math.max(start, cutoff);
+  if (anchor) {
+    if (
+      !Number.isInteger(anchor.count) ||
+      anchor.count < 0 ||
+      anchor.as_of < Math.min(start, now) ||
+      anchor.as_of > now ||
+      anchor.count < current
+    )
+      throw new AppError('Счётчик XTracker не согласуется с периодом или почасовой историей');
+    current = anchor.count;
+    predictionStart = Math.max(start, Math.min(end, anchor.as_of));
+  }
   const fitted = fit(data, Math.min(cutoff, end), zone),
-    draws = simulate(fitted, Math.max(start, cutoff), end, zone, samples);
+    draws = simulate(fitted, predictionStart, end, zone, samples);
   for (let i = 0; i < draws.length; i++) draws[i] += current;
   const sorted = draws.slice().sort(),
     min = sorted[0],
@@ -209,7 +230,7 @@ export function forecast(
     draws,
     result: {
       current_count: current,
-      cutoff: iso(cutoff),
+      cutoff: iso(anchor?.as_of ?? cutoff),
       mean: round(mean(draws)),
       median: Math.floor(quantile(sorted, 0.5)),
       low: Math.floor(quantile(sorted, 0.1)),

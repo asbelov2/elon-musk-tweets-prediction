@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import type { ForecastOutput, HourRow } from '../shared/types.js';
+import type { CounterAnchor, ForecastOutput, HourRow } from '../shared/types.js';
 import { AppError, errorMessage } from './errors.js';
 import { forecast } from './model.js';
 
@@ -9,6 +9,7 @@ export interface ForecastJob {
   end: number;
   timezone: string;
   now: number;
+  anchor?: CounterAnchor;
 }
 export type WorkerResponse =
   | { kind: 'tweetscope:forecast-result'; ok: true; output: ForecastOutput }
@@ -16,7 +17,15 @@ export type WorkerResponse =
 const job = workerData as ForecastJob;
 if (parentPort) {
   try {
-    const output = forecast(new Map(job.rows), job.start, job.end, job.timezone, job.now);
+    const output = forecast(
+      new Map(job.rows),
+      job.start,
+      job.end,
+      job.timezone,
+      job.now,
+      20_000,
+      job.anchor,
+    );
     parentPort.postMessage(
       { kind: 'tweetscope:forecast-result', ok: true, output } satisfies WorkerResponse,
       [output.draws.buffer as ArrayBuffer],

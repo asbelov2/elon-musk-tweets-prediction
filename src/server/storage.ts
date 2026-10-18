@@ -24,7 +24,13 @@ export class Store {
   close(): void {
     this.db.close();
   }
-  saveHours(rows: HourRow[], dataset: Dataset = 'live', source = 'csv', now = Date.now()): number {
+  saveHours(
+    rows: HourRow[],
+    dataset: Dataset = 'live',
+    source = 'csv',
+    now = Date.now(),
+    metadata?: { key: string; value: unknown },
+  ): number {
     const seen = new Set<number>(),
       cutoff = hour(now);
     for (const [time, count] of rows) {
@@ -45,6 +51,10 @@ export class Store {
       this.db
         .prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)')
         .run(dataset + ':updated', iso(now));
+      if (metadata)
+        this.db
+          .prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)')
+          .run(metadata.key, JSON.stringify(metadata.value));
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -83,6 +93,10 @@ export class Store {
   getSnapshot(slug: string): unknown {
     const row = this.db.prepare('SELECT payload FROM snapshots WHERE slug=?').get(slug);
     return row && typeof row.payload === 'string' ? (JSON.parse(row.payload) as unknown) : null;
+  }
+  getMetadata(key: string): unknown {
+    const row = this.db.prepare('SELECT value FROM metadata WHERE key=?').get(key);
+    return row && typeof row.value === 'string' ? (JSON.parse(row.value) as unknown) : null;
   }
 }
 
