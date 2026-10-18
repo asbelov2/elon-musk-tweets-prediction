@@ -299,7 +299,9 @@
               <div class="chart-heading">
                 <div>
                   <h2>Распределение итогового количества</h2>
-                  <p>20 000 сценариев · наведение показывает вероятность интервала</p>
+                  <p id="distribution-description">
+                    20 000 сценариев · вероятность каждого интервала
+                  </p>
                 </div>
                 <span class="legend"><i></i> Модель</span>
               </div>
@@ -313,31 +315,36 @@
                 <span>Число публикаций за выбранный период</span><span id="model-label"></span>
               </div>
             </section>
-            <section class="panel">
+            <section class="panel outcomes-panel">
               <h2>Вероятности исходов</h2>
               <p class="muted small">
                 Оценки модели, а не гарантии. Ошибка модели может быть больше погрешности симуляции.
               </p>
               <div id="outcomes"></div>
             </section>
-            <section class="panel">
-              <h2>Куда направить бюджет</h2>
-              <label
-                >Общий бюджет, $ (необязательно)<input
-                  id="budget"
-                  type="number"
-                  min="0"
-                  max="1000000"
-                  step="1"
-                  placeholder="Например, 100"
-              /></label>
+            <section class="panel budget-panel">
+              <div class="budget-heading">
+                <h2>Куда направить бюджет</h2>
+                <label
+                  >Общий бюджет, $ (необязательно)<input
+                    id="budget"
+                    type="number"
+                    min="0"
+                    max="1000000"
+                    step="1"
+                    placeholder="Например, 100"
+                /></label>
+              </div>
               <p id="allocation" aria-live="polite"></p>
-              <p class="muted small">
-                Ориентир: одна лучшая позиция, четверть доли Келли с запасом к вероятности, максимум
-                25% бюджета. Остаток — в деньгах. Это осторожная эвристика, не оптимизация портфеля;
-                бюджет должен быть суммой, которую вы готовы потерять. Изменение бюджета не
-                пересчитывает прогноз.
-              </p>
+              <details class="budget-method">
+                <summary>Как выбирается сумма покупки</summary>
+                <p class="muted small">
+                  Ориентир: одна лучшая позиция, четверть доли Келли с запасом к вероятности,
+                  максимум 25% бюджета. Остаток — в деньгах. Это осторожная эвристика, не
+                  оптимизация портфеля; бюджет должен быть суммой, которую вы готовы потерять.
+                  Изменение бюджета не пересчитывает прогноз.
+                </p>
+              </details>
             </section>
             <section class="panel positions-panel">
               <div class="chart-heading">
@@ -356,16 +363,72 @@
                 </select>
               </div>
               <div class="table-scroll">
-                <table>
+                <table id="positions-table">
                   <thead>
                     <tr>
-                      <th>ДИАПАЗОН / СТОРОНА</th>
-                      <th>ВЕРОЯТНОСТЬ</th>
-                      <th>ЦЕНА ПОКУПКИ</th>
-                      <th>EDGE</th>
-                      <th>EV на $100</th>
-                      <th>ROI</th>
-                      <th>ОЦЕНКА</th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="label"
+                          data-tooltip="Диапазон числа публикаций из правил рынка. YES выигрывает при попадании в диапазон, NO — вне его. Сортировка по нижней границе диапазона."
+                        >
+                          ДИАПАЗОН / СТОРОНА <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="probability"
+                          data-tooltip="Вероятность выигрыша этой стороны по модели. Для NO равна 1 минус вероятность YES. Это оценка модели, а не гарантия."
+                        >
+                          ВЕРОЯТНОСТЬ <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="vwap"
+                          data-tooltip="Средняя цена одной акции в центах по доступным предложениям продажи для условной покупки на $100. Резерв расходов учитывается отдельно."
+                        >
+                          ЦЕНА ПОКУПКИ <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="edge"
+                          data-tooltip="Преимущество в процентных пунктах: вероятность выигрыша минус стоимость одной акции с резервом расходов. Положительное значение означает преимущество по модели."
+                        >
+                          EDGE <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="expected_profit"
+                          data-tooltip="Ожидаемая прибыль в долларах: вероятность × число акций − покупка − резерв расходов. Расчёт для условного бюджета $100; при нехватке ликвидности — для доступного объёма."
+                        >
+                          EV на $100 <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="none">
+                        <button
+                          type="button"
+                          data-sort="roi"
+                          data-tooltip="Ожидаемая доходность: EV, делённый на фактическую стоимость покупки с резервом расходов, в процентах. Это математическое ожидание, не обещанная доходность."
+                        >
+                          ROI <span class="sort-icon" aria-hidden="true">↕</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort="descending">
+                        <button
+                          type="button"
+                          data-sort="signal"
+                          data-tooltip="Наличие положительного EV после запаса к вероятности при подтверждённых правилах, свежих данных и достаточной глубине стакана. Наведите на оценку в строке для причин ограничений."
+                        >
+                          ОЦЕНКА <span class="sort-icon" aria-hidden="true">↓</span>
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody id="positions-body"></tbody>
@@ -445,5 +508,6 @@
         ><span>READ-ONLY / NO WALLET</span>
       </footer>
     </main>
+    <div id="column-tooltip" class="column-tooltip" role="tooltip" hidden></div>
   </body>
 </html>

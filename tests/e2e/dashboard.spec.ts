@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { trackerFixture, SLUG } from '../fixtures/xtracker.js';
 import { collectTracker } from '../../src/server/xtracker.js';
+import type { Analysis } from '../../src/shared/types.js';
 
 test('Demo, outcome probabilities and interactive budget without recalculation', async ({
   page,
@@ -8,11 +9,27 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
+  const analysisResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/analyze'),
+  );
   await page.locator('#demo-empty').click();
+  const analysis = (await (await analysisResponse).json()) as Analysis;
   await expect(page.locator('#result-content')).toBeVisible();
   await expect(page.locator('#demo-banner')).toBeVisible();
   await expect(page.locator('#positions-body tr')).toHaveCount(14);
-  expect(await page.locator('#distribution svg rect').count()).toBeGreaterThan(0);
+  const markets = [...analysis.event!.markets].sort((a, b) => a.lower - b.lower);
+  await expect(page.locator('#distribution svg rect')).toHaveCount(markets.length);
+  for (const [i, market] of markets.entries()) {
+    const p = analysis.positions.find(
+      (p) => p.market_id === market.id && p.side === 'YES',
+    )!.probability;
+    await expect(page.locator('#distribution rect title').nth(i)).toHaveText(
+      `${market.label}: ${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(p * 100)}%`,
+    );
+  }
+  expect(await page.locator('#distribution svg text').allTextContents()).toEqual(
+    expect.arrayContaining(markets.map((m) => m.label)),
+  );
   await page.locator('#position-filter').selectOption('YES');
   await expect(page.locator('#positions-body tr')).toHaveCount(7);
   await page.locator('#budget').fill('200');
@@ -23,6 +40,110 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   await expect(page.locator('#demo-banner')).toBeHidden();
   await expect(page.locator('#result-content')).toBeHidden();
   expect(errors).toEqual([]);
+});
+
+test('Position columns sort numerically both ways and explain headers on hover or focus', async ({
+  page,
+}) => {
+  await page.route('**/api/analyze', async (route) => {
+    const response = await route.fetch();
+    const analysis = (await response.json()) as Analysis;
+    // An unavailable quote must stay at the bottom in either sort direction.
+    Object.assign(analysis.positions[0], { vwap: null, expected_profit: null, roi: null });
+    await route.fulfill({ json: analysis });
+  });
+  await page.goto('/');
+  await page.locator('#demo-empty').click();
+  await expect(page.locator('#positions-body tr')).toHaveCount(14);
+  const columns = ['probability', 'vwap', 'edge', 'expected_profit', 'roi'];
+  for (const [index, column] of columns.entries()) {
+    const button = page.locator(`[data-sort="${column}"]`);
+    await button.hover();
+    await expect(page.getByRole('tooltip')).toBeVisible();
+    expect((await page.getByRole('tooltip').textContent())!.length).toBeGreaterThan(30);
+    for (let click = 0; click < 2; click++) {
+      await button.click();
+      const ascending = column === 'vwap' ? click === 0 : click === 1;
+      await expect(button.locator('..')).toHaveAttribute(
+        'aria-sort',
+        ascending ? 'ascending' : 'descending',
+      );
+      const cells = await page
+        .locator(`#positions-body tr td:nth-child(${index + 2})`)
+        .allTextContents();
+      const values = cells
+        .filter((s) => s !== '—')
+        .map((s) =>
+          Number(
+            s
+              .replace(/\s/g, '')
+              .replace(',', '.')
+              .replace(/[^\d.+-]/g, ''),
+          ),
+        );
+      expect(values).toEqual([...values].sort((a, b) => (ascending ? a - b : b - a)));
+      if (column === 'vwap' || column === 'expected_profit' || column === 'roi') {
+        expect(cells.at(-1)).toBe('—');
+      }
+    }
+  }
+  const probability = page.locator('[data-sort="probability"]');
+  await probability.click();
+  await page.locator('#position-filter').selectOption('YES');
+  await expect(page.locator('#positions-body tr')).toHaveCount(7);
+  await expect(probability.locator('..')).toHaveAttribute('aria-sort', 'descending');
+  const label = page.locator('[data-sort="label"]');
+  await label.click();
+  await expect(page.locator('#positions-body tr').first()).toContainText('0-199');
+  await expect(page.locator('#positions-body tr').last()).toContainText('600+');
+  await label.press('Enter');
+  await expect(page.locator('#positions-body tr').first()).toContainText('600+');
+  await label.focus();
+  await expect(page.getByRole('tooltip')).toContainText('YES');
+  await label.press('Escape');
+  await expect(page.getByRole('tooltip')).toBeHidden();
+});
+
+test('Many market brackets stay exact and readable within a horizontally scrolling chart', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route('**/api/analyze', async (route) => {
+    const response = await route.fetch();
+    const analysis = (await response.json()) as Analysis;
+    const market = analysis.event!.markets[0];
+    const position = analysis.positions.find((p) => p.side === 'YES')!;
+    analysis.event!.markets = Array.from({ length: 26 }, (_, i) => ({
+      ...market,
+      id: `bracket-${i}`,
+      lower: i * 20,
+      upper: i === 25 ? null : i * 20 + 19,
+      label: i === 25 ? '500+' : `${i * 20}-${i * 20 + 19}`,
+    })).reverse();
+    analysis.positions = analysis.event!.markets.map((m) => ({
+      ...position,
+      market_id: m.id,
+      label: m.label,
+      probability: m.lower / 20 / 325,
+    }));
+    await route.fulfill({ json: analysis });
+  });
+  await page.goto('/');
+  await page.locator('#demo-empty').click();
+  await expect(page.locator('#distribution rect')).toHaveCount(26);
+  await expect(page.locator('#distribution rect title').first()).toHaveText('0-19: 0,00%');
+  await expect(page.locator('#distribution rect').first()).toHaveAttribute('height', '0');
+  await expect(page.locator('#distribution rect title').last()).toContainText('500+');
+  expect(
+    await page.locator('#distribution').evaluate((el) => el.scrollWidth > el.clientWidth),
+  ).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('#distribution').evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+  });
+  await page
+    .locator('#distribution')
+    .screenshot({ path: '/tmp/tweetscope-layout-market-mobile.png' });
 });
 
 test('CSV import, forecast without a market and CSV export', async ({ page }) => {
@@ -49,6 +170,7 @@ test('CSV import, forecast without a market and CSV export', async ({ page }) =>
   await expect(page.locator('#result-content')).toBeVisible();
   await expect(page.locator('#result-title')).not.toContainText('демо');
   await expect(page.locator('#positions-body')).toContainText('Рынок не выбран');
+  await expect(page.locator('#distribution-description')).toContainText('без выбранного рынка');
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByText('Экспорт реальной истории в CSV').click(),
@@ -84,7 +206,20 @@ test('Dashboard fits mobile and desktop viewports', async ({ page }) => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    const spacing = await page.evaluate(() => {
+      const outcomes = document.querySelector('.outcomes-panel')!.getBoundingClientRect();
+      const budget = document.querySelector('.budget-panel')!.getBoundingClientRect();
+      const positions = document.querySelector('.positions-panel')!.getBoundingClientRect();
+      const heading = document.querySelector('.outcomes-panel h2')!.getBoundingClientRect();
+      return [
+        budget.top - outcomes.bottom,
+        positions.top - budget.bottom,
+        heading.left - outcomes.left,
+      ];
+    });
+    expect(spacing.every((gap) => gap >= 12)).toBe(true);
   }
+  await page.locator('#result-content').screenshot({ path: '/tmp/tweetscope-layout-desktop.png' });
 });
 
 test('XTracker preview, isolated history and authoritative period controls', async ({ page }) => {

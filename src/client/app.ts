@@ -38,6 +38,11 @@ type ButtonId =
   | 'analyze'
   | 'one-day';
 type TrackerButton = 'sync-tracker';
+type SortColumn = 'label' | 'probability' | 'vwap' | 'edge' | 'expected_profit' | 'roi' | 'signal';
+const positionSort: { column: SortColumn; ascending: boolean } = {
+  column: 'signal',
+  ascending: false,
+};
 type ElementFor<Id extends string> = Id extends InputId
   ? HTMLInputElement
   : Id extends SelectId
@@ -255,15 +260,23 @@ function svgNode(name: string, attrs: Record<string, string | number> = {}, text
   if (text !== undefined) el.textContent = text;
   return el;
 }
-function chart(id: string, values: number[], labels: string[], isHistory = false) {
+function chart(
+  id: string,
+  values: number[],
+  labels: string[],
+  isHistory = false,
+  marketBins = false,
+) {
   const el = $(id);
   el.replaceChildren();
+  const width = marketBins ? Math.max(el.clientWidth, labels.length * 72, 360) : 800;
   const svg = svgNode('svg', {
-    viewBox: '0 0 800 230',
+    viewBox: `0 0 ${width} 230`,
     preserveAspectRatio: 'none',
     'aria-hidden': 'true',
   });
-  const w = 738,
+  if (marketBins) svg.style.width = `${width}px`;
+  const w = width - 62,
     h = 177,
     left = 48,
     top = 10,
@@ -288,7 +301,7 @@ function chart(id: string, values: number[], labels: string[], isHistory = false
       x: left + i * step + 1,
       y: base - bh,
       width: Math.max(1, step - 2),
-      height: Math.max(0.5, bh),
+      height: bh,
       rx: 2,
       class: isHistory ? 'history-bar' : 'bar',
     });
@@ -300,13 +313,13 @@ function chart(id: string, values: number[], labels: string[], isHistory = false
       ),
     );
     svg.append(rect);
-    const stride = Math.max(1, Math.ceil(values.length / 7));
+    const stride = marketBins ? 1 : Math.max(1, Math.ceil(values.length / 7));
     if (i % stride === 0)
       svg.append(
         svgNode(
           'text',
           { x: left + (i + 0.5) * step, y: base + 25, 'text-anchor': 'middle' },
-          isHistory ? labels[i].slice(5) : labels[i].split('–')[0],
+          isHistory ? labels[i].slice(5) : marketBins ? labels[i] : labels[i].split('–')[0],
         ),
       );
   });
@@ -354,6 +367,27 @@ function renderPositions() {
   const rows = r.positions.filter(
     (p) => filter === 'all' || (filter === 'signals' ? p.signal && !expired(p) : p.side === filter),
   );
+  const lower = new Map(r.event?.markets.map((m) => [m.id, m.lower]));
+  rows.sort((a, b) => {
+    if (positionSort.column === 'label') {
+      const order = (lower.get(a.market_id) ?? 0) - (lower.get(b.market_id) ?? 0);
+      return (
+        (positionSort.ascending ? order : -order) ||
+        (a.side === b.side ? 0 : a.side === 'YES' ? -1 : 1)
+      );
+    }
+    const value = (p: Position) =>
+      positionSort.column === 'signal'
+        ? Number(p.signal && !expired(p))
+        : p[positionSort.column as Exclude<SortColumn, 'label' | 'signal'>];
+    const av = value(a),
+      bv = value(b);
+    if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
+    return (
+      (positionSort.ascending ? av - bv : bv - av) ||
+      (positionSort.column === 'signal' ? (b.roi ?? -Infinity) - (a.roi ?? -Infinity) : 0)
+    );
+  });
   for (const p of rows) {
     const row = document.createElement('tr');
     const label = appendCell(row, p.label);
@@ -415,6 +449,94 @@ function renderPositions() {
     ? 'Котировки устарели: сигналы отключены. Нажмите «Рассчитать прогноз» для обновления. Значения EV ниже относятся к прошлому снимку.'
     : 'EV = вероятность × число акций − стоимость − резерв расходов. Цена покупки — средняя по доступным asks. Наведите на цену и оценку, чтобы увидеть расчёт и ограничения.';
 }
+let tooltipAnchor: HTMLButtonElement | null = null;
+function hideColumnTooltip() {
+  $('column-tooltip').hidden = true;
+  tooltipAnchor?.removeAttribute('aria-describedby');
+  tooltipAnchor = null;
+}
+function positionColumnTooltip() {
+  if (!tooltipAnchor) return;
+  const tooltip = $('column-tooltip');
+  const rect = tooltipAnchor.getBoundingClientRect();
+  if (rect.bottom <= 0 || rect.top >= window.innerHeight) {
+    hideColumnTooltip();
+    return;
+  }
+  tooltip.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - tooltip.offsetWidth - 12))}px`;
+  const above = rect.top - tooltip.offsetHeight - 10;
+  tooltip.style.top = `${Math.max(12, above >= 12 ? above : Math.min(rect.bottom + 10, window.innerHeight - tooltip.offsetHeight - 12))}px`;
+}
+for (const button of document.querySelectorAll<HTMLButtonElement>('#positions-table [data-sort]')) {
+  const column = button.dataset.sort as SortColumn;
+  button.addEventListener('click', () => {
+    positionSort.ascending =
+      positionSort.column === column
+        ? !positionSort.ascending
+        : column === 'label' || column === 'vwap';
+    positionSort.column = column;
+    for (const header of document.querySelectorAll<HTMLTableCellElement>('#positions-table th')) {
+      const selected = header.querySelector<HTMLButtonElement>('button')?.dataset.sort === column;
+      header.setAttribute(
+        'aria-sort',
+        selected ? (positionSort.ascending ? 'ascending' : 'descending') : 'none',
+      );
+      header.querySelector('.sort-icon')!.textContent = selected
+        ? positionSort.ascending
+          ? '↑'
+          : '↓'
+        : '↕';
+    }
+    renderPositions();
+  });
+  const show = () => {
+    hideColumnTooltip();
+    tooltipAnchor = button;
+    const tooltip = $('column-tooltip');
+    tooltip.textContent = button.dataset.tooltip ?? '';
+    tooltip.hidden = false;
+    button.setAttribute('aria-describedby', 'column-tooltip');
+    positionColumnTooltip();
+  };
+  button.addEventListener('mouseenter', show);
+  button.addEventListener('mouseleave', () => {
+    if (document.activeElement !== button) hideColumnTooltip();
+  });
+  button.addEventListener('focus', show);
+  button.addEventListener('blur', hideColumnTooltip);
+  button.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideColumnTooltip();
+  });
+}
+window.addEventListener('scroll', positionColumnTooltip, true);
+window.addEventListener('resize', () => {
+  hideColumnTooltip();
+  if (state.result) renderDistribution(state.result);
+});
+function renderDistribution(r: Analysis) {
+  const marketOutcomes =
+    r.event?.markets
+      .map((m) => ({
+        market: m,
+        position: r.positions.find((p) => p.market_id === m.id && p.side === 'YES'),
+      }))
+      .filter((entry) => entry.position)
+      .sort((a, b) => a.market.lower - b.market.lower) ?? [];
+  chart(
+    'distribution',
+    marketOutcomes.length
+      ? marketOutcomes.map((entry) => entry.position!.probability)
+      : r.histogram.map((b) => b.probability),
+    marketOutcomes.length
+      ? marketOutcomes.map((entry) => entry.market.label)
+      : r.histogram.map((b) => `${Math.floor(b.from)}–${Math.ceil(b.to)}`),
+    false,
+    marketOutcomes.length > 0,
+  );
+  $('distribution-description').textContent = marketOutcomes.length
+    ? `${number(r.samples)} сценариев · интервалы выбранного рынка · наведите на столбец для вероятности`
+    : `${number(r.samples)} сценариев · интервалы прогноза без выбранного рынка`;
+}
 function render(r: Analysis) {
   if (r.tracker) {
     showTracker(r.tracker);
@@ -427,12 +549,18 @@ function render(r: Analysis) {
     .sort((a, b) => b.probability - a.probability);
   $('outcomes').replaceChildren();
   for (const p of outcomes) {
-    const line = document.createElement('p');
-    line.textContent = `${p.label}: ${pct(p.probability, 2)}`;
+    const line = document.createElement('div');
+    line.className = 'outcome';
+    const label = document.createElement('span');
+    label.className = 'outcome-label';
+    label.textContent = p.label;
+    const probability = document.createElement('span');
+    probability.textContent = pct(p.probability, 2);
+    line.append(label, probability);
     const bar = document.createElement('progress');
     bar.max = 1;
     bar.value = p.probability;
-    bar.style.width = '100%';
+    bar.setAttribute('aria-label', `${p.label}: ${pct(p.probability, 2)}`);
     line.append(bar);
     $('outcomes').append(line);
   }
@@ -464,11 +592,7 @@ function render(r: Analysis) {
       'Искусственные данные: оценки позиций ниже не являются оценками реальных рынков.';
     $('warnings').prepend(p);
   }
-  chart(
-    'distribution',
-    r.histogram.map((b) => b.probability),
-    r.histogram.map((b) => `${Math.floor(b.from)}–${Math.ceil(b.to)}`),
-  );
+  renderDistribution(r);
   $('model-label').textContent = `${r.training_days} дней истории · Gamma–Poisson`;
   const days = r.daily.slice(-42);
   chart(
