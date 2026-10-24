@@ -515,6 +515,80 @@
                 гарантирует прибыль.
               </p>
             </section>
+            <section id="activity-panel" class="panel" hidden>
+              <div class="activity-heading">
+                <h2 id="activity-title">Ритм публикаций</h2>
+                <label
+                  >Профиль дня<select id="activity-day">
+                    <option value="all">Среднее по неделе</option>
+                    <option value="0">Понедельник</option>
+                    <option value="1">Вторник</option>
+                    <option value="2">Среда</option>
+                    <option value="3">Четверг</option>
+                    <option value="4">Пятница</option>
+                    <option value="5">Суббота</option>
+                    <option value="6">Воскресенье</option>
+                  </select></label
+                >
+              </div>
+              <p id="activity-meta" class="muted small"></p>
+              <div id="activity-warnings" class="warnings"></div>
+              <div class="activity-highlights">
+                <div>
+                  <span>Обычно тише · 6 часов</span><strong id="activity-quiet"></strong
+                  ><small id="activity-quiet-rate"></small>
+                </div>
+                <div>
+                  <span>Обычно активнее · 6 часов</span><strong id="activity-peak"></strong
+                  ><small id="activity-peak-rate"></small>
+                </div>
+                <div>
+                  <span>3 часа после расчёта</span><strong id="activity-next"></strong
+                  ><small id="activity-next-chance"></small>
+                </div>
+              </div>
+              <div class="activity-chart-grid">
+                <div>
+                  <h3>По часам · публикаций/ч</h3>
+                  <div
+                    id="activity-hourly"
+                    class="activity-chart"
+                    role="img"
+                    aria-label="Среднее число публикаций по часам суток"
+                  ></div>
+                </div>
+                <div>
+                  <h3>По дням недели · публикаций/24 ч</h3>
+                  <div
+                    id="activity-weekdays"
+                    class="activity-chart"
+                    role="img"
+                    aria-label="Среднее число публикаций по дням недели"
+                  ></div>
+                </div>
+              </div>
+              <p id="activity-trend" class="muted small"></p>
+              <details class="activity-details">
+                <summary>Почасовая карта недели</summary>
+                <p class="muted small">
+                  Светлее — выше ожидаемая активность. Наведите или перейдите клавишей Tab к ячейке
+                  для оценки и числа наблюдений.
+                </p>
+                <div
+                  id="activity-heatmap"
+                  class="activity-heatmap"
+                  role="group"
+                  aria-label="Активность по дням недели и часам"
+                ></div>
+              </details>
+              <h3>Ближайшие 12 часов · от момента расчёта</h3>
+              <div id="activity-upcoming" class="activity-upcoming"></div>
+              <p class="muted small">
+                Тихие часы означают меньше публикаций; определить сон по этим данным нельзя.
+                Почасовой и недельный ритм учитывается в прогнозе. Вероятности и 80% интервалы —
+                оценки модели по 4 000 сценариям.
+              </p>
+            </section>
             <div class="bottom-grid">
               <section class="panel chart-panel">
                 <div class="chart-heading">

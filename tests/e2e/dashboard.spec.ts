@@ -72,6 +72,7 @@ test('Cash advice keeps a full-bank scenario visible and budget changes do not r
     await page.locator('#budget').fill(String(budget));
     await expect(page.locator('#allocation')).toContainText('Оставить весь бюджет в деньгах');
     await expect(page.locator('#bank-plan')).toBeVisible();
+    await expect(page.locator('#activity-warnings')).toContainText('условные');
     await expect(page.locator('#bank-warnings')).toContainText('120 секунд');
     await expect(page.locator('#bank-warnings')).toContainText('свежести');
     const costs = await page.locator('#bank-rows td:nth-child(2)').allTextContents();
@@ -221,6 +222,7 @@ test('CSV import, forecast without a market and CSV export', async ({ page }) =>
   await expect(page.locator('#result-title')).not.toContainText('демо');
   await expect(page.locator('#positions-body')).toContainText('Рынок не выбран');
   await expect(page.locator('#distribution-description')).toContainText('без выбранного рынка');
+  await expect(page.locator('#activity-meta')).toContainText('UTC');
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByText('Экспорт реальной истории в CSV').click(),
@@ -435,4 +437,63 @@ test('Adding a verified market makes it selectable and visible after reloading t
   await expect(page.locator('#market-select option')).toHaveCount(3);
   await page.locator('#market-select').selectOption(item.id);
   await expect(page.locator('#event-url')).toHaveValue(item.event_url);
+});
+
+test('Activity profile shows hourly and weekly rhythms, near-term outlook and an accessible mobile heatmap', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const response = page.waitForResponse((r) => r.url().endsWith('/api/analyze'));
+  await page.locator('#demo-empty').click();
+  const analysis = (await (await response).json()) as Analysis;
+  await expect(page.locator('#activity-panel')).toBeVisible();
+  await expect(page.locator('#activity-title')).toContainText('@elonmusk');
+  await expect(page.locator('#activity-meta')).toContainText(analysis.activity!.timezone);
+  await expect(page.locator('#activity-meta')).toContainText(
+    `${analysis.activity!.training_days} полных дней`,
+  );
+  await expect(page.locator('#activity-hourly rect')).toHaveCount(24);
+  await expect(page.locator('#activity-day')).toHaveValue(
+    String(analysis.activity!.current_weekday),
+  );
+  await page.locator('#activity-day').selectOption('0');
+  const mondayPeak = analysis.activity!.weekdays[0].peak;
+  if (mondayPeak.mean_per_hour > analysis.activity!.weekdays[0].quiet.mean_per_hour * 1.15)
+    await expect(page.locator('#activity-peak')).toHaveText(
+      `${String(mondayPeak.start_hour).padStart(2, '0')}:00–${String(mondayPeak.end_hour).padStart(2, '0')}:00`,
+    );
+  await page.locator('#activity-day').selectOption('all');
+  await expect(page.locator('#activity-day')).toHaveValue('all');
+  await expect(page.locator('#activity-weekdays rect')).toHaveCount(7);
+  await expect(page.locator('#activity-upcoming .activity-slot')).toHaveCount(6);
+  for (const [index, item] of analysis.activity!.upcoming.entries()) {
+    const date = new Date(item.start).toLocaleString('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+    await expect(
+      page.locator('#activity-upcoming .activity-slot').nth(index).locator('small').last(),
+    ).toContainText(`МСК: ${date}`);
+  }
+  await expect(page.locator('#activity-next-chance')).toContainText('Хотя бы одна');
+  await expect(page.locator('#activity-trend')).toContainText('Последние 7 полных дней');
+  await page.locator('.activity-details summary').click();
+  await expect(page.locator('.activity-heat-cell')).toHaveCount(168);
+  const cell = page.locator('.activity-heat-cell').first();
+  await cell.focus();
+  await expect(cell).toBeFocused();
+  await expect(cell).toHaveAttribute('aria-label', /Пн 00:00–01:00.*часов наблюдений/);
+  await page
+    .locator('#activity-panel')
+    .screenshot({ path: '/tmp/tweetscope-activity-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.locator('#activity-heatmap').evaluate((el) => el.scrollWidth > el.clientWidth),
+  ).toBe(true);
+  await page.locator('#activity-panel').screenshot({ path: '/tmp/tweetscope-activity-mobile.png' });
+  await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
+  await expect(page.locator('#result-content')).toBeHidden();
 });

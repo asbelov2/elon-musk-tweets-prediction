@@ -78,7 +78,48 @@ export interface Backtest {
   coverage80: number | null;
   results: { date: string; actual: number; prediction: number; low: number; high: number }[];
 }
+export interface ActivityOutlook {
+  start: string;
+  end: string;
+  expected: number;
+  probability_any: number;
+  low: number;
+  high: number;
+}
+export interface ActivityProfile {
+  timezone: string;
+  current_weekday: number;
+  as_of: string;
+  history_end: string;
+  training_days: number;
+  effective_days: number;
+  fresh: boolean;
+  warnings: string[];
+  hourly: number[];
+  weekdays: {
+    weekday: number;
+    expected: number;
+    days: number;
+    quiet: ActivityProfile['quiet'];
+    peak: ActivityProfile['peak'];
+    hours: { hour: number; expected: number; observed_hours: number }[];
+  }[];
+  quiet: { start_hour: number; end_hour: number; hours: number; mean_per_hour: number };
+  peak: ActivityProfile['quiet'];
+  trend: {
+    recent_mean: number;
+    previous_mean: number;
+    change_ratio: number | null;
+    start: string;
+    midpoint: string;
+    end: string;
+  } | null;
+  next_three_hours: ActivityOutlook;
+  upcoming: ActivityOutlook[];
+  samples: number;
+}
 export interface ForecastSummary {
+  activity?: ActivityProfile;
   current_count: number;
   cutoff: string;
   mean: number;

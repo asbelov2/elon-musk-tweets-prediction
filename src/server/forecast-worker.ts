@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import type { CounterAnchor, ForecastOutput, HourRow } from '../shared/types.js';
 import { AppError, errorMessage } from './errors.js';
+import { activityProfile } from './activity.js';
 import { forecast } from './model.js';
 
 export interface ForecastJob {
@@ -26,6 +27,7 @@ if (parentPort) {
       20_000,
       job.anchor,
     );
+    output.result.activity = activityProfile(new Map(job.rows), job.timezone, job.now);
     parentPort.postMessage(
       { kind: 'tweetscope:forecast-result', ok: true, output } satisfies WorkerResponse,
       [output.draws.buffer as ArrayBuffer],

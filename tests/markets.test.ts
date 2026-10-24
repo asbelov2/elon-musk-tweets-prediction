@@ -118,6 +118,7 @@ test('Both built-in markets collect and forecast independently with account-spec
   }
   assert.equal(results[0].handle, 'elonmusk');
   assert.equal(results[1].handle, 'WhiteHouse');
+  assert.ok(Math.abs(results[1].activity!.hourly[12] - 2 * results[0].activity!.hourly[12]) < 1e-9);
   assert.equal(results[0].current_count, f.elon.detail.stats.total);
   assert.equal(results[1].current_count, f.whiteHouse.detail.stats.total);
   assert.ok(results[1].mean > results[0].mean * 1.5);

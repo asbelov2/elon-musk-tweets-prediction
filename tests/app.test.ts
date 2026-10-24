@@ -44,6 +44,9 @@ test('Complete demo workflow runs the real forecast worker and returns 14 positi
   assert.equal(response.statusCode, 200, response.body);
   const result = response.json<Analysis>();
   assert.equal(result.positions.length, 14);
+  assert.equal(result.activity?.timezone, demo.timezone);
+  assert.equal(result.activity?.weekdays.length, 7);
+  assert.equal(result.activity?.upcoming.length, 6);
   assert.equal(result.backtest.days, 14);
   assert.equal(result.event?.demo, true);
   assert.equal((await app.inject('/api/status')).json<Status>().live.hours, 0);

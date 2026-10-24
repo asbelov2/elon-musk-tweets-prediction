@@ -1,3 +1,4 @@
+import { renderActivity, updateActivityStatus } from './activity.js';
 import { allocateBank, recommend } from '../shared/allocation.js';
 import type {
   Analysis,
@@ -747,6 +748,7 @@ function render(r: Analysis) {
     $('warnings').prepend(p);
   }
   renderDistribution(r);
+  renderActivity(r);
   $('model-label').textContent = `${r.training_days} дней истории · Gamma–Poisson`;
   const days = r.daily.slice(-42);
   chart(
@@ -907,7 +909,10 @@ $('one-day').addEventListener('click', () => {
   message('Выбраны сутки: отдельный прогноз без рыночных позиций.');
 });
 setInterval(() => {
-  if (state.result) renderPositions();
+  if (state.result) {
+    renderPositions();
+    updateActivityStatus(state.result);
+  }
 }, 10000);
 setInterval(async () => {
   if (!$('auto-refresh').checked || !state.result || state.busy || document.hidden) return;
