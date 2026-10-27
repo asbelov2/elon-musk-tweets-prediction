@@ -291,6 +291,11 @@ test('XTracker preview, isolated history and authoritative period controls', asy
     ),
     report = collection.tracker!;
   let saved = false;
+  let legacyRequests = 0;
+  await page.route(/\/api\/collect(?:\/.*)?$/, (route) => {
+    legacyRequests++;
+    return route.abort('blockedbyclient');
+  });
   const empty = { hours: 0, posts: 0, sources: [], start: null, end: null };
   await page.route('**/api/status*', (route) =>
     route.fulfill({
@@ -310,7 +315,7 @@ test('XTracker preview, isolated history and authoritative period controls', asy
       },
     }),
   );
-  await page.route('**/api/collect', (route) =>
+  await page.route('**/api/history/preview', (route) =>
     route.fulfill({
       json: {
         posts: collection.posts,
@@ -323,7 +328,7 @@ test('XTracker preview, isolated history and authoritative period controls', asy
       },
     }),
   );
-  await page.route('**/api/collect/confirm', (route) => {
+  await page.route('**/api/history/confirm', (route) => {
     saved = true;
     return route.fulfill({ json: { imported_hours: collection.rows.length, dataset: 'xtracker' } });
   });
@@ -346,6 +351,41 @@ test('XTracker preview, isolated history and authoritative period controls', asy
   await page.locator('#start').fill('2026-10-14T12:00');
   await page.locator('#sync-tracker').click();
   await expect(page.locator('#start')).toHaveValue(report.local_start);
+  expect(legacyRequests).toBe(0);
+});
+
+test('Collection validates depth locally and displays server and network errors beside the button', async ({
+  page,
+}) => {
+  let requests = 0;
+  let failNetwork = false;
+  await page.route('**/api/history/preview', (route) => {
+    requests++;
+    if (failNetwork) return route.abort('blockedbyclient');
+    return route.fulfill({ status: 422, json: { detail: 'body/days must be integer' } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#history-management')).toBeVisible();
+  await page.locator('#tab-tracker').click();
+  for (const value of ['', '14', '15.5', '121']) {
+    await page.locator('#history-days').fill(value);
+    await page.locator('#collect').click();
+    await expect(page.locator('#history-message')).toContainText('целое число от 15 до 120');
+  }
+  expect(requests).toBe(0);
+  await page.locator('#history-days').fill('30');
+  await page.locator('#collect').click();
+  await expect(page.locator('#history-message')).toContainText('HTTP 422');
+  await expect(page.locator('#history-message')).toContainText('body/days must be integer');
+  expect(requests).toBe(1);
+  failNetwork = true;
+  await page.locator('#collect').click();
+  await expect(page.locator('#history-message')).toContainText('ERR_BLOCKED_BY_CLIENT');
+  await expect(page.locator('#collection-preview')).toBeHidden();
+  await expect(page.locator('#collect')).toBeEnabled();
+  expect(requests).toBe(2);
+  await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
+  await expect(page.locator('#history-message')).toBeHidden();
 });
 
 test('Market switching resets results and ignores a late counter from the previous account', async ({

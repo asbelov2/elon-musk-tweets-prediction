@@ -154,6 +154,8 @@
                     type="number"
                     min="15"
                     max="120"
+                    step="1"
+                    required
                     value="90"
                 /></label>
                 <div id="x-filters" hidden>
@@ -172,6 +174,7 @@
                   </p>
                 </div>
                 <button id="collect" class="button secondary wide">Собрать историю</button>
+                <p id="history-message" class="notice error" role="alert" hidden></p>
                 <div id="collection-preview" hidden>
                   <p id="preview-text" class="muted"></p>
                   <label class="checkbox"

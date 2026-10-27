@@ -67,6 +67,9 @@ test('All static assets, CSP and local OpenAPI documentation are served', async 
   }
   const schema = (await app.inject('/openapi.json')).json<{ paths: Record<string, unknown> }>();
   assert.ok(schema.paths['/api/analyze']);
+  assert.ok(schema.paths['/api/history/preview']);
+  assert.ok(schema.paths['/api/history/confirm']);
+  assert.equal(schema.paths['/api/collect'], undefined);
 });
 test('Validation rejects negative/nonfinite budgets, naive CSV times and unconfirmed coverage', async (t) => {
   const { app } = await setup(t);
@@ -143,7 +146,7 @@ test('Collection preview never writes data before explicit confirmation', async 
   const preview = (
     await app.inject({
       method: 'POST',
-      url: '/api/collect',
+      url: '/api/history/preview',
       payload: { source: 'xtracker', days: 15, event_url: SLUG },
     })
   ).json<CollectionPreview>();
@@ -151,14 +154,14 @@ test('Collection preview never writes data before explicit confirmation', async 
   assert.equal(store.load().data.size, 0);
   const rejected = await app.inject({
     method: 'POST',
-    url: '/api/collect/confirm',
+    url: '/api/history/confirm',
     payload: { preview_id: preview.preview_id },
   });
   assert.equal(rejected.statusCode, 400);
   assert.equal(store.load().data.size, 0);
   const confirmed = await app.inject({
     method: 'POST',
-    url: '/api/collect/confirm',
+    url: '/api/history/confirm',
     payload: { preview_id: preview.preview_id, coverage_confirmed: true },
   });
   assert.equal(confirmed.statusCode, 200, confirmed.body);
@@ -168,12 +171,49 @@ test('Collection preview never writes data before explicit confirmation', async 
     (
       await app.inject({
         method: 'POST',
-        url: '/api/collect/confirm',
+        url: '/api/history/confirm',
         payload: { preview_id: preview.preview_id, coverage_confirmed: true },
       })
     ).statusCode,
     400,
   );
+});
+test('Legacy collection preview remains compatible with the current confirmation route', async (t) => {
+  const { transport } = trackerFixture(now);
+  const { app, store } = await setup(t, transport);
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/collect',
+    payload: { source: 'xtracker', days: 15, event_url: SLUG },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(store.load('xtracker').data.size, 0);
+  const confirmed = await app.inject({
+    method: 'POST',
+    url: '/api/history/confirm',
+    payload: {
+      preview_id: response.json<CollectionPreview>().preview_id,
+      coverage_confirmed: true,
+    },
+  });
+  assert.equal(confirmed.statusCode, 200, confirmed.body);
+  assert.equal(store.load('xtracker').data.size, 360);
+});
+test('Invalid collection depth is rejected before any provider request or write', async (t) => {
+  let calls = 0;
+  const { app, store } = await setup(t, async () => {
+    calls++;
+    throw new Error('Should not call');
+  });
+  for (const url of ['/api/history/preview', '/api/collect']) {
+    for (const days of ['', null, 14, 15.5, 121]) {
+      const response = await app.inject({ method: 'POST', url, payload: { days } });
+      assert.equal(response.statusCode, 422, response.body);
+      assert.match(response.json<{ detail: string }>().detail, /days/);
+    }
+  }
+  assert.equal(calls, 0);
+  assert.equal(store.load('xtracker').data.size, 0);
 });
 test('X collection without a key cannot make metered network calls', async (t) => {
   let calls = 0;

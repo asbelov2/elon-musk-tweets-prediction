@@ -121,16 +121,23 @@ function message(text: string, kind = '') {
   $('message').hidden = !text;
 }
 async function api<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch(
-    path,
-    body === undefined
-      ? {}
-      : {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-  );
+  let r: Response;
+  try {
+    r = await fetch(
+      path,
+      body === undefined
+        ? {}
+        : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+    );
+  } catch {
+    throw new Error(
+      'Не удалось получить ответ сервера. Проверьте соединение и доступность сайта. Если в консоли есть ERR_BLOCKED_BY_CLIENT, проверьте блокировщик рекламы или защиту браузера для этого сайта.',
+    );
+  }
   let data: unknown;
   try {
     data = await r.json();
@@ -140,11 +147,13 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) {
     const detail =
       data !== null && typeof data === 'object' && 'detail' in data ? data.detail : undefined;
+    if (r.status === 422 && typeof detail === 'string')
+      throw new Error(`Сервер отклонил параметры запроса (HTTP 422): ${detail}`);
     throw new Error(typeof detail === 'string' ? detail : `Ошибка HTTP ${r.status}`);
   }
   return data as T;
 }
-async function action(button: HTMLButtonElement, work: () => Promise<void>) {
+async function action(button: HTMLButtonElement, work: () => Promise<void>, errorId?: string) {
   if (state.busy) return;
   state.busy = true;
   const previous = button.textContent;
@@ -152,10 +161,17 @@ async function action(button: HTMLButtonElement, work: () => Promise<void>) {
   button.disabled = true;
   button.textContent = 'Выполняется…';
   message('');
+  if (errorId) $(errorId).hidden = true;
   try {
     await work();
   } catch (e) {
-    if (context === state.handle + '|' + $('event-url').value) message(errorText(e), 'error');
+    if (context === state.handle + '|' + $('event-url').value) {
+      message(errorText(e), 'error');
+      if (errorId) {
+        $(errorId).textContent = errorText(e);
+        $(errorId).hidden = false;
+      }
+    }
   } finally {
     state.busy = false;
     button.disabled = false;
@@ -193,6 +209,7 @@ function selectMarket(id: string) {
   state.preview = null;
   $('tracker-counter').hidden = true;
   $('collection-preview').hidden = true;
+  $('history-message').hidden = true;
   $('rules-confirm').checked = false;
   $('csv-confirm').checked = false;
   $('csv-file').value = '';
@@ -825,44 +842,57 @@ $('import').addEventListener('click', () =>
   }),
 );
 $('collect').addEventListener('click', () =>
-  action($('collect'), async () => {
-    state.preview = null;
-    $('collection-preview').hidden = true;
-    const version = state.version;
-    const r = await api<CollectionPreview>('/api/collect', {
-      handle: state.handle,
-      source: $('collector-source').value,
-      mode: $('x-mode').value,
-      days: Number($('history-days').value),
-      include_replies: $('include-replies').checked,
-      include_reposts: $('include-reposts').checked,
-      event_url: $('event-url').value,
-    });
-    if (version !== state.version) return;
-    state.preview = r.preview_id;
-    if (r.tracker) showTracker(r.tracker, true);
-    $('collection-preview').hidden = false;
-    $('tracker-confirm').checked = false;
-    $('preview-text').textContent =
-      `Найдено ${number(r.posts)} публикаций, ${number(r.hours)} часов. ${stamp(r.start)} → ${stamp(r.end)}. ${r.notice}`;
-  }),
+  action(
+    $('collect'),
+    async () => {
+      state.preview = null;
+      $('collection-preview').hidden = true;
+      const version = state.version;
+      const days = $('history-days').valueAsNumber;
+      if (!Number.isInteger(days) || days < 15 || days > 120) {
+        $('history-days').focus();
+        throw new Error('Глубина истории — целое число от 15 до 120 дней.');
+      }
+      const r = await api<CollectionPreview>('/api/history/preview', {
+        handle: state.handle,
+        source: $('collector-source').value,
+        mode: $('x-mode').value,
+        days,
+        include_replies: $('include-replies').checked,
+        include_reposts: $('include-reposts').checked,
+        event_url: $('event-url').value,
+      });
+      if (version !== state.version) return;
+      state.preview = r.preview_id;
+      if (r.tracker) showTracker(r.tracker, true);
+      $('collection-preview').hidden = false;
+      $('tracker-confirm').checked = false;
+      $('preview-text').textContent =
+        `Найдено ${number(r.posts)} публикаций, ${number(r.hours)} часов. ${stamp(r.start)} → ${stamp(r.end)}. ${r.notice}`;
+    },
+    'history-message',
+  ),
 );
 $('confirm-collect').addEventListener('click', () =>
-  action($('confirm-collect'), async () => {
-    if (!state.preview) throw new Error('Сначала соберите историю.');
-    const version = state.version;
-    const r = await api<{ imported_hours: number; dataset: Dataset }>('/api/collect/confirm', {
-      preview_id: state.preview,
-      coverage_confirmed: $('tracker-confirm').checked,
-    });
-    state.preview = null;
-    $('collection-preview').hidden = true;
-    if (version !== state.version) return;
-    setMode(r.dataset);
-    $('rules-confirm').checked = false;
-    await status();
-    message(`Сохранено ${number(r.imported_hours)} часов.`, 'success');
-  }),
+  action(
+    $('confirm-collect'),
+    async () => {
+      if (!state.preview) throw new Error('Сначала соберите историю.');
+      const version = state.version;
+      const r = await api<{ imported_hours: number; dataset: Dataset }>('/api/history/confirm', {
+        preview_id: state.preview,
+        coverage_confirmed: $('tracker-confirm').checked,
+      });
+      state.preview = null;
+      $('collection-preview').hidden = true;
+      if (version !== state.version) return;
+      setMode(r.dataset);
+      $('rules-confirm').checked = false;
+      await status();
+      message(`Сохранено ${number(r.imported_hours)} часов.`, 'success');
+    },
+    'history-message',
+  ),
 );
 $('load-market').addEventListener('click', () =>
   action($('load-market'), async () => {
@@ -940,11 +970,13 @@ $('collector-source').addEventListener('change', () => {
   $('x-filters').hidden = $('collector-source').value !== 'x';
   state.preview = null;
   $('collection-preview').hidden = true;
+  $('history-message').hidden = true;
 });
 for (const id of ['x-mode', 'history-days', 'include-replies', 'include-reposts'])
   $(id).addEventListener('change', () => {
     state.preview = null;
     $('collection-preview').hidden = true;
+    $('history-message').hidden = true;
   });
 $('sync-tracker').addEventListener('click', () => action($('sync-tracker'), loadTrackerWindow));
 $('history-source').addEventListener('change', () => {

@@ -75,7 +75,14 @@ test('Optional administrator mode keeps public calculations available and protec
   assert.equal((await app.inject('/')).statusCode, 200);
   assert.equal((await app.inject('/api/health')).statusCode, 200);
   assert.equal((await app.inject('/api/status')).json<Status>().access?.can_manage_data, false);
-  for (const url of ['/api/import', '/api/collect', '/api/collect/confirm', '/api/markets']) {
+  for (const url of [
+    '/api/import',
+    '/api/history/preview',
+    '/api/history/confirm',
+    '/api/collect',
+    '/api/collect/confirm',
+    '/api/markets',
+  ]) {
     const result = await app.inject({
       method: 'POST',
       url,

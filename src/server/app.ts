@@ -106,6 +106,8 @@ export async function createApp(options: AppOptions = {}) {
     });
   const adminPaths = new Set([
     '/api/import',
+    '/api/history/preview',
+    '/api/history/confirm',
     '/api/collect',
     '/api/collect/confirm',
     '/api/markets',
@@ -329,69 +331,78 @@ export async function createApp(options: AppOptions = {}) {
       return event;
     },
   );
-  app.post(
-    '/api/collect',
-    { schema: { summary: 'Предпросмотр сбора API X / XTracker', body: CollectBody } },
-    async (request) => {
-      const config = {
-        ...request.body,
-        handle: resolveHandle(store, request.body.event_url, request.body.handle),
-      };
-      const collected =
-        config.source === 'x'
-          ? await collectX(config, options.transport, now(), env)
-          : await collectTracker(config, options.transport, now());
-      for (const [key, value] of staged)
-        if (performance.now() - value.created > 1_800_000) staged.delete(key);
-      if (staged.size >= 10) staged.delete(staged.keys().next().value!);
-      const preview_id = randomUUID();
-      staged.set(preview_id, {
-        created: performance.now(),
-        rows: collected.rows,
-        config,
-        tracker: collected.tracker,
-      });
-      const { rows, ...summary } = collected;
-      return { ...summary, preview_id, hours: rows.length };
-    },
-  );
-  app.post(
-    '/api/collect/confirm',
-    {
-      schema: {
-        summary: 'Подтвердить полноту и сохранить сбор',
-        body: Type.Object(
-          { preview_id: Type.String({ maxLength: 40 }), coverage_confirmed: Confirmed },
-          { additionalProperties: false },
-        ),
+  for (const url of ['/api/history/preview', '/api/collect'])
+    app.post(
+      url,
+      {
+        schema: {
+          summary: 'Предпросмотр сбора API X / XTracker',
+          body: CollectBody,
+          hide: url === '/api/collect',
+        },
       },
-    },
-    async (request) => {
-      const item = staged.get(request.body.preview_id);
-      if (!item || performance.now() - item.created > 1_800_000)
-        throw new AppError('Предпросмотр истёк. Повторите сбор.');
-      if (!request.body.coverage_confirmed)
-        throw new AppError('Подтвердите полноту источника и правила');
-      const config = item.config,
-        source =
-          config.source === 'xtracker'
-            ? TRACKER_SOURCE
-            : `x:${config.mode}:replies=${Number(config.include_replies)}:reposts=${Number(config.include_reposts)}`;
-      const dataset = config.source === 'xtracker' ? 'xtracker' : 'live';
-      const imported_hours = store.saveHours(
-        item.rows,
-        dataset,
-        source,
-        now(),
-        item.tracker
-          ? { key: 'tracker:import:' + item.tracker.slug, value: item.tracker }
-          : undefined,
-        config.handle,
-      );
-      staged.delete(request.body.preview_id);
-      return { imported_hours, dataset, handle: config.handle };
-    },
-  );
+      async (request) => {
+        const config = {
+          ...request.body,
+          handle: resolveHandle(store, request.body.event_url, request.body.handle),
+        };
+        const collected =
+          config.source === 'x'
+            ? await collectX(config, options.transport, now(), env)
+            : await collectTracker(config, options.transport, now());
+        for (const [key, value] of staged)
+          if (performance.now() - value.created > 1_800_000) staged.delete(key);
+        if (staged.size >= 10) staged.delete(staged.keys().next().value!);
+        const preview_id = randomUUID();
+        staged.set(preview_id, {
+          created: performance.now(),
+          rows: collected.rows,
+          config,
+          tracker: collected.tracker,
+        });
+        const { rows, ...summary } = collected;
+        return { ...summary, preview_id, hours: rows.length };
+      },
+    );
+  for (const url of ['/api/history/confirm', '/api/collect/confirm'])
+    app.post(
+      url,
+      {
+        schema: {
+          summary: 'Подтвердить полноту и сохранить сбор',
+          hide: url === '/api/collect/confirm',
+          body: Type.Object(
+            { preview_id: Type.String({ maxLength: 40 }), coverage_confirmed: Confirmed },
+            { additionalProperties: false },
+          ),
+        },
+      },
+      async (request) => {
+        const item = staged.get(request.body.preview_id);
+        if (!item || performance.now() - item.created > 1_800_000)
+          throw new AppError('Предпросмотр истёк. Повторите сбор.');
+        if (!request.body.coverage_confirmed)
+          throw new AppError('Подтвердите полноту источника и правила');
+        const config = item.config,
+          source =
+            config.source === 'xtracker'
+              ? TRACKER_SOURCE
+              : `x:${config.mode}:replies=${Number(config.include_replies)}:reposts=${Number(config.include_reposts)}`;
+        const dataset = config.source === 'xtracker' ? 'xtracker' : 'live';
+        const imported_hours = store.saveHours(
+          item.rows,
+          dataset,
+          source,
+          now(),
+          item.tracker
+            ? { key: 'tracker:import:' + item.tracker.slug, value: item.tracker }
+            : undefined,
+          config.handle,
+        );
+        staged.delete(request.body.preview_id);
+        return { imported_hours, dataset, handle: config.handle };
+      },
+    );
   app.get(
     '/api/xtracker',
     {
