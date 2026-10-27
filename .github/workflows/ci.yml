@@ -20,6 +20,13 @@ jobs:
       - run: npm run test:e2e
       - run: docker build -t tweetscope:ci .
       - run: npm run test:docker -- tweetscope:ci
+      - name: Validate IP and HTTPS Compose configurations
+        env:
+          PUBLIC_URL: http://203.0.113.10
+          APP_DOMAIN: tweetscope.example
+        run: |
+          docker compose --env-file .env.example -f compose.yaml -f compose.ip.yaml config --quiet
+          docker compose --env-file .env.example -f compose.yaml -f compose.https.yaml config --quiet
       - name: Validate HTTPS proxy configuration
         run: docker run --rm -e APP_DOMAIN=tweetscope.example -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Upload browser traces on failure
