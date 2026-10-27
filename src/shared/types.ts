@@ -191,6 +191,7 @@ export interface DataStatus {
   end: string | null;
 }
 export interface Status {
+  access?: { can_manage_data: boolean; write_access: 'admin' | 'public' };
   handle?: string;
   live: DataStatus;
   demo: DataStatus;

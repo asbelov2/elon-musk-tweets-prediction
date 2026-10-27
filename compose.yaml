@@ -1,0 +1,38 @@
+name: tweetscope
+services:
+  app:
+    image: tweetscope:local
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 40s
+    ports:
+      - '127.0.0.1:${TWEETSCOPE_HTTP_PORT:-18080}:8000'
+    environment:
+      NODE_ENV: production
+      PORT: '8000'
+      TWEETSCOPE_HOST: 0.0.0.0
+      TWEET_DB: /app/data/tweets.sqlite3
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:18080}
+      TRUST_PROXY_HOPS: '1'
+      WRITE_ACCESS: ${WRITE_ACCESS:-public}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN:-}
+      TWITTER_BEARER_TOKEN: ${TWITTER_BEARER_TOKEN:-}
+    volumes:
+      - tweetscope_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+volumes:
+  tweetscope_data:

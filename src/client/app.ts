@@ -253,6 +253,14 @@ async function status() {
     dataset = state.dataset;
   const all = await api<Status>('/api/status?handle=' + encodeURIComponent(handle));
   if (state.handle !== handle || state.dataset !== dataset) return;
+  const canManage = all.access?.can_manage_data ?? true;
+  $('history-management').hidden = !canManage;
+  $('add-market-form').hidden = !canManage;
+  $('admin-link').hidden = canManage || all.access?.write_access !== 'admin';
+  $('access-note').hidden = canManage;
+  $('empty-summary').textContent = canManage
+    ? 'Загрузите почасовые данные, выберите период и получите распределение вероятностей. Затем сравните его с реальными ценами покупки.'
+    : 'Выберите рынок с загруженной историей или откройте демонстрацию. Историю обновляет администратор.';
   const data = all[state.dataset];
   $('export-history').setAttribute(
     'href',

@@ -8,6 +8,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
 await app.listen({ host: process.env.TWEETSCOPE_HOST ?? '127.0.0.1', port });
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
+    setTimeout(() => process.exit(1), 35_000).unref();
     void app
       .close()
       .then(() => closeRemoteTransport())

@@ -4,6 +4,8 @@ import { performance } from 'node:perf_hooks';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
+import rateLimit from '@fastify/rate-limit';
+import { webConfig } from './web-config.js';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import type {
@@ -83,23 +85,51 @@ interface Staged {
 }
 
 export async function createApp(options: AppOptions = {}) {
+  const env = options.env ?? process.env;
+  const web = webConfig(env);
   const app = Fastify({
-    logger: options.logger ?? false,
+    logger: options.logger
+      ? { redact: ['req.headers.authorization', 'req.headers.cookie'] }
+      : false,
+    trustProxy: web.trustProxy,
     bodyLimit: 6_000_000,
   }).withTypeProvider<TypeBoxTypeProvider>();
   const store = options.store ?? new Store(),
-    env = options.env ?? process.env,
     now = options.now ?? Date.now;
   const staged = new Map<string, Staged>();
+  if (web.rateLimitEnabled)
+    await app.register(rateLimit, {
+      max: web.rateLimit,
+      timeWindow: '1 minute',
+      allowList: (request) =>
+        ['GET', 'HEAD'].includes(request.method) && request.url.split('?')[0] === '/api/health',
+    });
+  const adminPaths = new Set([
+    '/api/import',
+    '/api/collect',
+    '/api/collect/confirm',
+    '/api/markets',
+  ]);
   await app.register(swagger, { openapi: { info: { title: 'TweetScope', version: '1.0.0' } } });
   app.addSchema({ $id: 'AnalyzeRequest', ...AnalyzeBody });
   app.addSchema({ $id: 'CollectRequest', ...CollectBody });
   app.addHook('onRequest', async (request, reply) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.headers.origin;
-      if (origin && origin.replace(/\/$/, '') !== `${request.protocol}://${request.headers.host}`)
+      const expected = web.publicOrigin ?? `${request.protocol}://${request.headers.host}`;
+      if (
+        request.headers['sec-fetch-site'] === 'cross-site' ||
+        (origin && origin.replace(/\/$/, '') !== expected)
+      )
         return reply.code(403).send({ detail: 'Cross-origin requests are not allowed' });
     }
+    const path = request.routeOptions.url ?? request.url.split('?')[0];
+    const managed = (request.method === 'POST' && adminPaths.has(path)) || path === '/api/admin';
+    if (web.writeAccess === 'admin' && managed && !web.isAdmin(request.headers.authorization))
+      return reply
+        .code(401)
+        .header('WWW-Authenticate', 'Basic realm="TweetScope admin", charset="UTF-8"')
+        .send({ detail: 'Для изменения общей истории и каталога войдите как администратор.' });
   });
   app.addHook('onSend', async (_request, reply) => {
     reply.headers({
@@ -136,6 +166,7 @@ export async function createApp(options: AppOptions = {}) {
   app.get('/', { schema: { hide: true } }, async (_r, reply) => reply.sendFile('index.html'));
   app.get('/api/docs', { schema: { hide: true } }, async (_r, reply) => reply.sendFile('api.html'));
   app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
+  app.get('/api/admin', { schema: { hide: true } }, async (_request, reply) => reply.redirect('/'));
   app.get('/api/health', { schema: { summary: 'Проверка процесса' } }, async () => ({
     status: 'ok',
   }));
@@ -189,7 +220,14 @@ export async function createApp(options: AppOptions = {}) {
     },
     async (request) => {
       const handle = resolveHandle(store, undefined, request.query.handle);
-      const result = { handle } as Status;
+      const result = {
+        handle,
+        access: {
+          can_manage_data:
+            web.writeAccess === 'public' || web.isAdmin(request.headers.authorization),
+          write_access: web.writeAccess,
+        },
+      } as Status;
       for (const dataset of ['live', 'demo', 'xtracker'] as Dataset[]) {
         const { data, sources } = store.load(dataset, handle),
           times = [...data.keys()];
@@ -383,7 +421,10 @@ export async function createApp(options: AppOptions = {}) {
   );
   app.post(
     '/api/analyze',
-    { schema: { summary: 'Прогноз и оценка загруженного снимка', body: AnalyzeBody } },
+    {
+      config: { rateLimit: { max: 6, timeWindow: '1 minute' } },
+      schema: { summary: 'Прогноз и оценка загруженного снимка', body: AnalyzeBody },
+    },
     async (request): Promise<Analysis> => {
       const body = request.body;
       const handle = resolveHandle(

@@ -1,0 +1,28 @@
+services:
+  app:
+    environment:
+      PUBLIC_URL: https://${APP_DOMAIN:?Set APP_DOMAIN to your domain name}
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN to your domain name}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+volumes:
+  caddy_data:
+  caddy_config:

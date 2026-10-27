@@ -48,8 +48,9 @@
             </select></label
           >
           <p id="selected-account" class="muted small">История и прогноз: @elonmusk</p>
+          <a id="admin-link" class="small" href="/api/admin" hidden>Администратор</a>
         </div>
-        <details id="add-market-form">
+        <details id="add-market-form" hidden>
           <summary>Добавить рынок публикаций</summary>
           <div class="market-fields">
             <label
@@ -75,6 +76,10 @@
             проверяются по источнику. Каталог сохраняется; история разных аккаунтов разделена.
           </p>
         </details>
+        <p id="access-note" class="muted small" hidden>
+          Историю и каталог обновляет администратор. Вы можете выбирать рынки, строить прогнозы и
+          рассчитывать бюджет.
+        </p>
       </section>
       <div class="workspace">
         <aside>
@@ -97,82 +102,86 @@
                 <option value="live">API X / CSV · дополнительная история</option>
               </select></label
             >
-            <div class="source-tabs" role="tablist" aria-label="Источник истории">
-              <button id="tab-csv" role="tab" aria-selected="false">CSV</button
-              ><button class="selected" id="tab-tracker" role="tab" aria-selected="true">
-                API X / XTracker
-              </button>
-            </div>
-            <div id="csv-panel" hidden>
-              <label class="upload" for="csv-file"
-                ><span class="upload-icon">↑</span><strong>Выберите CSV-файл</strong
-                ><span>timestamp,count · до 5 МБ</span
-                ><input id="csv-file" type="file" accept=".csv,text/csv"
-              /></label>
-              <p class="file-name" id="file-name"></p>
-              <label class="checkbox"
-                ><input id="csv-confirm" type="checkbox" /><span
-                  >Каждая строка — полный час; типы публикаций соответствуют правилам рынка.</span
-                ></label
-              ><button class="button secondary wide" id="import">Импортировать историю</button>
-            </div>
-            <div id="tracker-panel">
-              <label
-                >Источник<select id="collector-source">
-                  <option value="xtracker">XTracker · Post Counter / Export Data</option>
-                  <option value="x">Официальный API X (дополнительно)</option>
-                </select></label
-              >
-              <div id="x-options" hidden>
+            <div id="history-management" hidden>
+              <div class="source-tabs" role="tablist" aria-label="Источник истории">
+                <button id="tab-csv" role="tab" aria-selected="false">CSV</button
+                ><button class="selected" id="tab-tracker" role="tab" aria-selected="true">
+                  API X / XTracker
+                </button>
+              </div>
+              <div id="csv-panel" hidden>
+                <label class="upload" for="csv-file"
+                  ><span class="upload-icon">↑</span><strong>Выберите CSV-файл</strong
+                  ><span>timestamp,count · до 5 МБ</span
+                  ><input id="csv-file" type="file" accept=".csv,text/csv"
+                /></label>
+                <p class="file-name" id="file-name"></p>
+                <label class="checkbox"
+                  ><input id="csv-confirm" type="checkbox" /><span
+                    >Каждая строка — полный час; типы публикаций соответствуют правилам рынка.</span
+                  ></label
+                ><button class="button secondary wide" id="import">Импортировать историю</button>
+              </div>
+              <div id="tracker-panel">
                 <label
-                  >Доступ API X<select id="x-mode">
-                    <option value="archive">Полный архив · search/all</option>
-                    <option value="timeline">Лента · последние публикации</option>
+                  >Источник<select id="collector-source">
+                    <option value="xtracker">XTracker · Post Counter / Export Data</option>
+                    <option value="x">Официальный API X (дополнительно)</option>
                   </select></label
                 >
-                <p id="x-key-status" class="muted small">Ключ: проверка…</p>
-                <p class="muted small">
-                  Ключ X_BEARER_TOKEN задаётся только в секретах среды. Запросы расходуют лимит
-                  вашего тарифа. Лента отклоняется, если не достигает начала периода; для длинной
-                  истории нужен архив.
-                </p>
-              </div>
-              <p class="muted small">
-                XTracker: полный Export Data сверяется с числом записей источника и Post Counter
-                выбранного события. Состав публикаций сохраняется как у трекера, без повторной
-                фильтрации ответов и репостов. Токен X для этого не нужен.
-              </p>
-              <label
-                >Глубина истории, дней<input
-                  id="history-days"
-                  type="number"
-                  min="15"
-                  max="120"
-                  value="90"
-              /></label>
-              <div id="x-filters" hidden>
-                <div class="check-row">
-                  <label class="checkbox"
-                    ><input id="include-reposts" type="checkbox" checked /><span
-                      >Репосты</span
-                    ></label
-                  ><label class="checkbox"
-                    ><input id="include-replies" type="checkbox" /><span>Ответы</span></label
+                <div id="x-options" hidden>
+                  <label
+                    >Доступ API X<select id="x-mode">
+                      <option value="archive">Полный архив · search/all</option>
+                      <option value="timeline">Лента · последние публикации</option>
+                    </select></label
                   >
+                  <p id="x-key-status" class="muted small">Ключ: проверка…</p>
+                  <p class="muted small">
+                    Ключ X_BEARER_TOKEN задаётся только в секретах среды. Запросы расходуют лимит
+                    вашего тарифа. Лента отклоняется, если не достигает начала периода; для длинной
+                    истории нужен архив.
+                  </p>
                 </div>
                 <p class="muted small">
-                  Обычные и цитирующие публикации включены. Сверьте состав с правилами конкретного
-                  рынка.
+                  XTracker: полный Export Data сверяется с числом записей источника и Post Counter
+                  выбранного события. Состав публикаций сохраняется как у трекера, без повторной
+                  фильтрации ответов и репостов. Токен X для этого не нужен.
                 </p>
-              </div>
-              <button id="collect" class="button secondary wide">Собрать историю</button>
-              <div id="collection-preview" hidden>
-                <p id="preview-text" class="muted"></p>
-                <label class="checkbox"
-                  ><input id="tracker-confirm" type="checkbox" /><span
-                    >Проверил полноту всего интервала и правила подсчёта.</span
-                  ></label
-                ><button id="confirm-collect" class="button secondary wide">Сохранить сбор</button>
+                <label
+                  >Глубина истории, дней<input
+                    id="history-days"
+                    type="number"
+                    min="15"
+                    max="120"
+                    value="90"
+                /></label>
+                <div id="x-filters" hidden>
+                  <div class="check-row">
+                    <label class="checkbox"
+                      ><input id="include-reposts" type="checkbox" checked /><span
+                        >Репосты</span
+                      ></label
+                    ><label class="checkbox"
+                      ><input id="include-replies" type="checkbox" /><span>Ответы</span></label
+                    >
+                  </div>
+                  <p class="muted small">
+                    Обычные и цитирующие публикации включены. Сверьте состав с правилами конкретного
+                    рынка.
+                  </p>
+                </div>
+                <button id="collect" class="button secondary wide">Собрать историю</button>
+                <div id="collection-preview" hidden>
+                  <p id="preview-text" class="muted"></p>
+                  <label class="checkbox"
+                    ><input id="tracker-confirm" type="checkbox" /><span
+                      >Проверил полноту всего интервала и правила подсчёта.</span
+                    ></label
+                  ><button id="confirm-collect" class="button secondary wide">
+                    Сохранить сбор
+                  </button>
+                </div>
               </div>
             </div>
             <a id="export-history" class="small-link" href="/api/export?dataset=xtracker"
@@ -291,7 +300,7 @@
             <div class="empty-glyph">▥</div>
             <div class="eyebrow">ВАША АНАЛИТИЧЕСКАЯ ПАНЕЛЬ</div>
             <h2>Начните с истории публикаций</h2>
-            <p>
+            <p id="empty-summary">
               Загрузите почасовые данные, выберите период и получите распределение вероятностей.
               Затем сравните его с реальными ценами покупки.
             </p>

@@ -14,10 +14,13 @@
     "start": "node --env-file-if-exists=.env dist/src/server/index.js",
     "dev": "npm run build && concurrently -k \"tsc -p tsconfig.server.json --watch --preserveWatchOutput\" \"node dist/scripts/build.js --watch\" \"node --env-file-if-exists=.env --watch --watch-path=dist/src dist/src/server/index.js\"",
     "test:e2e": "playwright test",
-    "format": "prettier --write src tests scripts public *.json *.md playwright.config.ts",
-    "format:check": "prettier --check src tests scripts public *.json *.md playwright.config.ts"
+    "format": "prettier --write src tests scripts public deploy .github *.json *.md *.yaml playwright.config.ts",
+    "format:check": "prettier --check src tests scripts public deploy .github *.json *.md *.yaml playwright.config.ts",
+    "backup": "node --env-file-if-exists=.env dist/scripts/backup.js",
+    "test:docker": "node scripts/smoke-docker.ts"
   },
   "dependencies": {
+    "@fastify/rate-limit": "11.2.1",
     "@fastify/static": "10.1.6",
     "@fastify/swagger": "9.9.2",
     "@fastify/type-provider-typebox": "5.2.0",

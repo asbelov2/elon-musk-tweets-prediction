@@ -9,7 +9,8 @@ const config: BuildOptions = {
   platform: 'browser',
   target: 'es2022',
   format: 'iife',
-  sourcemap: true,
+  sourcemap: process.env.NODE_ENV !== 'production',
+  minify: process.env.NODE_ENV === 'production',
 };
 const staticFiles = ['index.html', 'api.html', 'style.css', 'favicon.svg'];
 async function copyStatic(): Promise<void> {
