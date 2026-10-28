@@ -18,7 +18,7 @@ import type {
   TrackerReport,
 } from '../shared/types.js';
 import { accountKey, DEFAULT_HANDLE } from './accounts.js';
-import { listMarkets, resolveHandle, saveMarket } from './markets.js';
+import { archiveMarket, listMarkets, resolveHandle, saveMarket } from './markets.js';
 import { demoEvent, demoHours } from './demo.js';
 import { AppError } from './errors.js';
 import { runForecast } from './forecast-runner.js';
@@ -111,6 +111,7 @@ export async function createApp(options: AppOptions = {}) {
     '/api/collect',
     '/api/collect/confirm',
     '/api/markets',
+    '/api/markets/archive',
   ]);
   await app.register(swagger, { openapi: { info: { title: 'TweetScope', version: '1.0.0' } } });
   app.addSchema({ $id: 'AnalyzeRequest', ...AnalyzeBody });
@@ -210,6 +211,22 @@ export async function createApp(options: AppOptions = {}) {
       saveMarket(store, config);
       store.snapshot(slug, { ...event, handle: config.handle });
       return listMarkets(store).find((market) => market.id === slug)!;
+    },
+  );
+  app.post(
+    '/api/markets/archive',
+    {
+      schema: {
+        summary: 'Убрать событие из каталога, сохранив историю аккаунта',
+        body: Type.Object(
+          { id: Type.String({ minLength: 1, maxLength: 200 }) },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request) => {
+      archiveMarket(store, request.body.id);
+      return { archived: request.body.id, markets: listMarkets(store) };
     },
   );
   app.get(

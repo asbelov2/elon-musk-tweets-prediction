@@ -233,7 +233,7 @@ test('Streamlined XTracker interface, CSV export and offline API documentation',
     page.locator('#api-paths summary').filter({ hasText: 'GET /api/markets' }),
   ).toHaveCount(1);
   await expect(
-    page.locator('#api-paths summary').filter({ hasText: 'POST /api/markets' }),
+    page.locator('#api-paths summary').filter({ hasText: /^POST \/api\/markets ·/ }),
   ).toHaveCount(1);
   await expect(
     page.locator('#api-paths summary').filter({ hasText: 'POST /api/analyze' }),
@@ -583,4 +583,50 @@ test('Reference clocks label market time, update every second and adjust Texas d
   await expect(page.locator('#texas-zone')).toHaveText('America/Chicago · UTC-6');
   await page.locator('#add-market-form summary').click();
   await expect(page.locator('#new-market-handle')).toHaveAttribute('list', 'account-suggestions');
+});
+
+test('Events can be removed through an empty catalog, persist after reload and be added back without losing history', async ({
+  page,
+}) => {
+  const restore = async (slug: string, handle: string) => {
+    const response = await page.request.post('/api/markets', {
+      data: { event_url: 'https://polymarket.com/event/' + slug, handle },
+    });
+    expect(response.ok()).toBe(true);
+  };
+  try {
+    await page.goto('/');
+    await expect(page.locator('#archive-market')).toBeVisible();
+    const before = await (await page.request.get('/api/status?handle=elonmusk')).json();
+    await page.locator('#analyze').click();
+    await expect(page.locator('#result-content')).toBeVisible();
+    await page.locator('#archive-market').click();
+    await expect(page.locator('#market-select')).toHaveValue(WHITE_HOUSE_SLUG);
+    await expect(page.locator('#selected-account')).toContainText('@WhiteHouse');
+    await expect(page.locator('#result-content')).toBeHidden();
+    await expect(page.locator('#message')).toContainText('История сохранена');
+    await page.reload();
+    await expect(page.locator('#market-select')).toHaveValue(WHITE_HOUSE_SLUG);
+    await expect(page.locator('#event-url')).toHaveValue(
+      'https://polymarket.com/event/' + WHITE_HOUSE_SLUG,
+    );
+    await page.locator('#archive-market').click();
+    await expect(page.locator('#market-select')).toBeDisabled();
+    await expect(page.locator('#archive-market')).toBeHidden();
+    await expect(page.locator('#event-url')).toHaveValue('');
+    await page.reload();
+    await expect(page.locator('#market-select')).toBeDisabled();
+    await page.locator('#add-market-form summary').click();
+    await page.locator('#new-market-url').fill('https://polymarket.com/event/' + SLUG);
+    await page.locator('#new-market-handle').fill('@elonmusk');
+    await page.locator('#add-market').click();
+    await expect(page.locator('#market-select')).toHaveValue(SLUG);
+    await expect(page.locator('#archive-market')).toBeVisible();
+    const after = await (await page.request.get('/api/status?handle=elonmusk')).json();
+    expect(after.xtracker.hours).toBe(before.xtracker.hours);
+    expect(after.xtracker.posts).toBe(before.xtracker.posts);
+  } finally {
+    await restore(SLUG, 'elonmusk');
+    await restore(WHITE_HOUSE_SLUG, 'WhiteHouse');
+  }
 });

@@ -25,7 +25,7 @@ type InputId =
   | 'safety'
   | 'auto-refresh';
 type SelectId = 'market-select' | 'position-filter';
-type ButtonId = 'add-market' | 'collect' | 'load-market' | 'analyze';
+type ButtonId = 'add-market' | 'archive-market' | 'collect' | 'load-market' | 'analyze';
 type TrackerButton = 'sync-tracker';
 type SortColumn = 'label' | 'probability' | 'vwap' | 'edge' | 'expected_profit' | 'roi' | 'signal';
 const positionSort: { column: SortColumn; ascending: boolean } = {
@@ -52,6 +52,7 @@ const state: {
   result: Analysis | null;
   event: MarketEvent | null;
   busy: boolean;
+  canManage: boolean;
   version: number;
   tracker: TrackerReport | null;
 } = {
@@ -60,6 +61,7 @@ const state: {
   result: null,
   event: null,
   busy: false,
+  canManage: false,
   version: 0,
   tracker: null,
 };
@@ -161,19 +163,23 @@ function updateMarketOptions(preferred?: string) {
     ...state.markets.map((market) => new Option(`${market.label} · @${market.handle}`, market.id)),
   );
   if (state.markets.some((market) => market.id === previous)) $('market-select').value = previous;
+  if (!state.markets.length) $('market-select').add(new Option('Нет событий — добавьте новое', ''));
+  $('market-select').disabled = !state.markets.length;
+  $('archive-market').hidden = !state.canManage || !state.markets.length;
 }
 function selectMarket(id: string) {
   const market = state.markets.find((entry) => entry.id === id);
-  if (!market) return;
-  state.handle = market.handle;
-  $('market-select').value = market.id;
-  $('event-url').value = market.event_url;
-  $('selected-account').textContent = `История и прогноз: @${market.handle}`;
+  if (market) state.handle = market.handle;
+  $('market-select').value = market?.id ?? '';
+  $('event-url').value = market?.event_url ?? '';
+  $('selected-account').textContent = market
+    ? `История и прогноз: @${market.handle}`
+    : 'Нет событий. Добавьте новое через форму ниже.';
   $('data-state').textContent = 'ЗАГРУЗКА';
-  $('data-summary').textContent = `Проверяю историю @${market.handle}…`;
+  $('data-summary').textContent = `Проверяю историю @${state.handle}…`;
   $('export-history').setAttribute(
     'href',
-    '/api/export?dataset=xtracker&handle=' + encodeURIComponent(market.handle),
+    '/api/export?dataset=xtracker&handle=' + encodeURIComponent(state.handle),
   );
   state.event = null;
   state.tracker = null;
@@ -192,8 +198,29 @@ function selectMarket(id: string) {
 async function initializeMarkets() {
   state.markets = await api<MarketConfig[]>('/api/markets');
   updateMarketOptions();
+  selectMarket($('market-select').value);
   await status();
 }
+$('archive-market').addEventListener('click', () =>
+  action($('archive-market'), async () => {
+    const market = state.markets.find((entry) => entry.id === $('market-select').value);
+    if (!market) throw new Error('Сначала выберите событие.');
+    const result = await api<{ archived: string; markets: MarketConfig[] }>(
+      '/api/markets/archive',
+      { id: market.id },
+    );
+    const selected = $('market-select').value;
+    state.markets = result.markets;
+    updateMarketOptions();
+    if (selected === result.archived || !state.markets.some((entry) => entry.id === selected))
+      selectMarket($('market-select').value);
+    await status();
+    message(
+      `«${market.label}» убрано из списка. История сохранена; событие можно добавить снова по той же ссылке.`,
+      'success',
+    );
+  }),
+);
 $('market-select').addEventListener('change', () => {
   selectMarket($('market-select').value);
   void status().catch((error) => message(errorText(error), 'error'));
@@ -226,6 +253,8 @@ async function status() {
   const all = await api<Status>('/api/status?handle=' + encodeURIComponent(handle));
   if (state.handle !== handle) return;
   const canManage = all.access?.can_manage_data ?? true;
+  state.canManage = canManage;
+  $('archive-market').hidden = !canManage || !state.markets.length;
   $('history-management').hidden = !canManage;
   $('add-market-form').hidden = !canManage;
   $('admin-link').hidden = canManage || all.access?.write_access !== 'admin';

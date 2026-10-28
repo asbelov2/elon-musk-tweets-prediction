@@ -4,6 +4,7 @@ import { AppError } from './errors.js';
 import { slugFrom } from './providers.js';
 import type { Store } from './storage.js';
 const CATALOG_KEY = 'markets:catalog:v1';
+const ARCHIVED_KEY = 'markets:archived:v1';
 export const BUILTIN_MARKETS: MarketConfig[] = [
   {
     id: 'elon-musk-of-tweets-october-13-october-20-2026',
@@ -18,7 +19,7 @@ export const BUILTIN_MARKETS: MarketConfig[] = [
     event_url: 'https://polymarket.com/event/white-house-of-tweets-october-13-october-20-2026',
   },
 ];
-export function listMarkets(store: Store): MarketConfig[] {
+function catalogMarkets(store: Store): MarketConfig[] {
   const saved = store.getMetadata(CATALOG_KEY);
   if (!Array.isArray(saved)) return [...BUILTIN_MARKETS];
   const entries = [...BUILTIN_MARKETS];
@@ -36,8 +37,26 @@ export function listMarkets(store: Store): MarketConfig[] {
   }
   return entries;
 }
+function archivedIds(store: Store): Set<string> {
+  const saved = store.getMetadata(ARCHIVED_KEY);
+  if (saved == null) return new Set();
+  if (!Array.isArray(saved) || saved.some((id) => typeof id !== 'string'))
+    throw new AppError('Повреждён список убранных событий', 500);
+  return new Set(saved as string[]);
+}
+export function listMarkets(store: Store): MarketConfig[] {
+  const archived = archivedIds(store);
+  return catalogMarkets(store).filter((market) => !archived.has(market.id));
+}
+export function archiveMarket(store: Store, id: string): void {
+  if (!catalogMarkets(store).some((market) => market.id === id))
+    throw new AppError('Событие не найдено в каталоге.', 404);
+  const archived = archivedIds(store);
+  archived.add(id);
+  store.setMetadata(ARCHIVED_KEY, [...archived]);
+}
 export function resolveHandle(store: Store, eventUrl?: string, requested?: string): string {
-  const entries = listMarkets(store);
+  const entries = catalogMarkets(store);
   const market = eventUrl ? entries.find((entry) => entry.id === slugFrom(eventUrl)) : undefined;
   if (market) {
     if (requested && accountKey(requested) !== accountKey(market.handle))
@@ -50,12 +69,15 @@ export function resolveHandle(store: Store, eventUrl?: string, requested?: strin
   return entries.find((entry) => accountKey(entry.handle) === accountKey(handle))?.handle ?? handle;
 }
 export function saveMarket(store: Store, config: MarketConfig): void {
-  const entries = listMarkets(store);
+  const entries = catalogMarkets(store);
   const existing = entries.find((entry) => entry.id === config.id);
   if (existing && accountKey(existing.handle) !== accountKey(config.handle))
     throw new AppError('Это событие уже связано с другим аккаунтом.');
-  if (!existing) {
-    if (entries.length >= 100) throw new AppError('В каталоге уже 100 рынков.');
-    store.setMetadata(CATALOG_KEY, [...entries, config]);
+  const archived = archivedIds(store);
+  if ((!existing || archived.has(config.id)) && listMarkets(store).length >= 100)
+    throw new AppError('В каталоге уже 100 рынков.');
+  if (!existing) store.setMetadata(CATALOG_KEY, [...entries, config]);
+  if (archived.delete(config.id)) {
+    store.setMetadata(ARCHIVED_KEY, [...archived]);
   }
 }

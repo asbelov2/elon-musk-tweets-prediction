@@ -31,6 +31,7 @@ test('Optional admin mode keeps the public forecast UI and hides management cont
   await expect(page.locator('#admin-link')).toBeVisible();
   await expect(page.locator('#history-management')).toBeHidden();
   await expect(page.locator('#add-market-form')).toBeHidden();
+  await expect(page.locator('#archive-market')).toBeHidden();
   await expect(page.locator('#access-note')).toContainText('администратор');
   await expect(page.locator('#analyze')).toBeVisible();
   await expect(page.locator('#demo-empty')).toHaveCount(0);
@@ -46,6 +47,7 @@ test('Browser HTTP authentication restores management controls after the admin r
     await expect(page.locator('#market-select option')).toHaveCount(2);
     await expect(page.locator('#history-management')).toBeVisible();
     await expect(page.locator('#add-market-form')).toBeVisible();
+    await expect(page.locator('#archive-market')).toBeVisible();
     await expect(page.locator('#admin-link')).toBeHidden();
   } finally {
     await context.close();

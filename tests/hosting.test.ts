@@ -82,6 +82,7 @@ test('Optional administrator mode keeps public calculations available and protec
     '/api/collect',
     '/api/collect/confirm',
     '/api/markets',
+    '/api/markets/archive',
   ]) {
     const result = await app.inject({
       method: 'POST',

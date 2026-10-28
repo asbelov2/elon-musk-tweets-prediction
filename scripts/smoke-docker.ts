@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { DemoEvent, Analysis, Status } from '../src/shared/types.js';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { DemoEvent, Analysis, Status, MarketConfig } from '../src/shared/types.js';
 
 const exec = promisify(execFile);
 const docker = async (...args: string[]) =>
@@ -10,11 +13,13 @@ const docker = async (...args: string[]) =>
 const image = process.argv[2] ?? 'tweetscope:local';
 const name = `tweetscope-smoke-${randomUUID()}`;
 const volume = name + '-data';
+const migratedVolume = name + '-migrated';
+const transferDir = await mkdtemp(join(tmpdir(), 'tweetscope-transfer-'));
 const password = randomBytes(24).toString('base64url');
 const basic = 'Basic ' + Buffer.from('admin:' + password).toString('base64');
 const origin = 'https://tweetscope.example';
 let base = '';
-async function start(mode: 'public' | 'admin') {
+async function start(mode: 'public' | 'admin', dataVolume = volume) {
   await docker(
     'run',
     '-d',
@@ -30,6 +35,8 @@ async function start(mode: 'public' | 'admin') {
     'no-new-privileges:true',
     '--memory',
     '1g',
+    '--cpus',
+    '1',
     '-e',
     'PUBLIC_URL=' + origin,
     '-e',
@@ -43,7 +50,7 @@ async function start(mode: 'public' | 'admin') {
     '-p',
     '127.0.0.1::8000',
     '-v',
-    volume + ':/app/data',
+    dataVolume + ':/app/data',
     image,
   );
   const port = (await docker('port', name, '8000/tcp')).split(':').at(-1)!;
@@ -79,6 +86,40 @@ async function stop() {
   assert.equal(await docker('inspect', '--format', '{{.State.ExitCode}}', name), '0');
   await docker('rm', name);
 }
+async function restoreCopy(data: Buffer) {
+  const guard = `set -eu
+for file in /app/data/tweets.sqlite3 /app/data/tweets.sqlite3-wal /app/data/tweets.sqlite3-shm; do
+  if [ -e "$file" ]; then echo 'Database already exists' >&2; exit 1; fi
+done
+umask 077
+cat > /app/data/tweets.sqlite3`;
+  await new Promise<void>((resolve, reject) => {
+    const child = execFile(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '-i',
+        '-v',
+        migratedVolume + ':/app/data',
+        '--entrypoint',
+        'sh',
+        image,
+        '-c',
+        guard,
+      ],
+      { maxBuffer: 4_000_000 },
+      (error) => {
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+    child.stdin!.on('error', () => {
+      /* Refusal to overwrite can close the pipe early. */
+    });
+    child.stdin!.end(data);
+  });
+}
 try {
   await docker('volume', 'create', volume);
   await start('public');
@@ -106,7 +147,12 @@ try {
     body: '{}',
   });
   assert.equal(denied.status, 403);
+  const catalog = await json<MarketConfig[]>('/api/markets');
+  await json('/api/markets/archive', { id: catalog[0].id });
   await docker('exec', name, 'node', 'dist/scripts/backup.js', '/app/data/backups/smoke.sqlite3');
+  const copyPath = join(transferDir, 'transfer.sqlite3');
+  await docker('cp', name + ':/app/data/backups/smoke.sqlite3', copyPath);
+  const copy = await readFile(copyPath);
   const check = await docker(
     'exec',
     name,
@@ -122,6 +168,9 @@ try {
   assert.equal(after.demo.hours, before.demo.hours);
   assert.equal(after.live.posts, 7);
   assert.equal(after.access?.can_manage_data, false);
+  assert.ok(
+    (await json<MarketConfig[]>('/api/markets')).every((market) => market.id !== catalog[0].id),
+  );
   const blocked = await fetch(base + '/api/import', {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -131,8 +180,19 @@ try {
   await json('/api/import', { content, coverage_confirmed: true }, true);
   assert.equal((await json<Status>('/api/status', undefined, true)).access?.can_manage_data, true);
   await stop();
+  await docker('volume', 'create', migratedVolume);
+  await restoreCopy(copy);
+  await assert.rejects(restoreCopy(copy), /Database already exists/);
+  await start('public', migratedVolume);
+  const migrated = await json<Status>('/api/status');
+  assert.equal(migrated.demo.hours, before.demo.hours);
+  assert.equal(migrated.live.posts, 7);
+  assert.ok(
+    (await json<MarketConfig[]>('/api/markets')).every((market) => market.id !== catalog[0].id),
+  );
+  await stop();
   console.log(
-    'Docker smoke passed: public UI/API, worker forecast, non-root read-only runtime, SQLite persistence, online backup, HTTPS origin and optional administration.',
+    'Docker smoke passed with 1 CPU / 1 GiB: public UI/API, worker forecast, SQLite persistence, archived catalog, backup and migration to a fresh volume, overwrite protection, HTTPS origin and optional administration.',
   );
 } catch (error) {
   try {
@@ -144,4 +204,10 @@ try {
     await docker('rm', '-f', name);
   } catch {}
   await docker('volume', 'rm', volume);
+  try {
+    await docker('volume', 'rm', migratedVolume);
+  } catch {
+    /* May not have been created yet. */
+  }
+  await rm(transferDir, { recursive: true, force: true });
 }

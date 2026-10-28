@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Analysis, CollectionPreview, MarketConfig, Status } from '../src/shared/types.js';
 import { createApp } from '../src/server/app.js';
+import { demoEvent } from '../src/server/demo.js';
+import {
+  archiveMarket,
+  BUILTIN_MARKETS,
+  listMarkets,
+  resolveHandle,
+  saveMarket,
+} from '../src/server/markets.js';
 import { Store, readCsv } from '../src/server/storage.js';
 import { collectTracker, fetchTrackerCounter } from '../src/server/xtracker.js';
 import { collectX } from '../src/server/x-api.js';
@@ -36,6 +47,90 @@ async function setup(t: TestContext, transport: Transport) {
   });
   return { app, store };
 }
+
+test('Archiving hides built-in events without provider calls or removing history and snapshots', async (t) => {
+  let calls = 0;
+  const { app, store } = await setup(t, async () => {
+    calls++;
+    throw new Error('Archiving must work offline');
+  });
+  const time = hour(now) - HOUR;
+  store.saveHours([[time, 7]], 'xtracker', 'fixture', now);
+  store.saveHours([[time, 11]], 'xtracker', 'fixture', now, undefined, 'WhiteHouse');
+  store.setMetadata('tracker:' + SLUG, { count: 7 });
+  const snapshot = demoEvent(now);
+  store.snapshot(SLUG, snapshot);
+  for (const id of [SLUG, WHITE_HOUSE_SLUG, WHITE_HOUSE_SLUG]) {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/markets/archive',
+      payload: { id },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(
+      !response.json<{ markets: MarketConfig[] }>().markets.some((market) => market.id === id),
+    );
+  }
+  assert.deepEqual((await app.inject('/api/markets')).json(), []);
+  assert.equal(store.load('xtracker').data.get(time), 7);
+  assert.equal(store.load('xtracker', 'WhiteHouse').data.get(time), 11);
+  assert.deepEqual(store.getMetadata('tracker:' + SLUG), { count: 7 });
+  assert.deepEqual(store.getSnapshot(SLUG), snapshot);
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/api/markets/archive',
+        payload: { id: 'unknown-event' },
+      })
+    ).statusCode,
+    404,
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/markets/archive', payload: { id: '' } }))
+      .statusCode,
+    422,
+  );
+  assert.equal(calls, 0);
+});
+
+test('Archived catalog survives restart, keeps account bindings and restores through adding the same event', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'tweetscope-archive-'));
+  const path = join(dir, 'tweets.sqlite3');
+  let store = new Store(path);
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const custom = {
+    id: 'nasa-posts',
+    handle: 'NASA',
+    label: 'NASA posts',
+    event_url: 'https://polymarket.com/event/nasa-posts',
+  };
+  assert.equal(listMarkets(store).length, 2);
+  saveMarket(store, custom);
+  archiveMarket(store, SLUG);
+  archiveMarket(store, custom.id);
+  // Saving another entry must not resurrect an archived built-in or discard custom entries.
+  saveMarket(store, {
+    ...custom,
+    id: 'nasa-posts-next',
+    event_url: 'https://polymarket.com/event/nasa-posts-next',
+  });
+  store.close();
+  store = new Store(path);
+  assert.deepEqual(
+    listMarkets(store).map((market) => market.id),
+    [WHITE_HOUSE_SLUG, 'nasa-posts-next'],
+  );
+  assert.equal(resolveHandle(store, custom.event_url), 'NASA');
+  assert.throws(() => saveMarket(store, { ...custom, handle: 'WrongAccount' }), /другим аккаунтом/);
+  saveMarket(store, custom);
+  saveMarket(store, BUILTIN_MARKETS[0]);
+  assert.equal(listMarkets(store).length, 4);
+  assert.equal(listMarkets(store).filter((market) => market.id === SLUG).length, 1);
+});
 
 test('Account namespaces preserve legacy UTC rows and isolate every dataset case-insensitively', (t) => {
   const store = new Store(':memory:');
