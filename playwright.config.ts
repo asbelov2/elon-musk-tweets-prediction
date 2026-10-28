@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run build && npm start',
+    command: 'npm run build && node dist/tests/fixtures/browser-server.js',
     url: 'http://127.0.0.1:8011/api/health',
     timeout: 60_000,
     reuseExistingServer: false,

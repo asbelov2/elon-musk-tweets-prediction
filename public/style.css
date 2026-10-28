@@ -409,6 +409,73 @@ th[aria-sort='descending'] {
 .setup-panel {
   padding: 16px;
 }
+.panel-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.panel-heading > h2,
+.panel-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.panel-toggle {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+.panel-toggle:hover,
+.panel-toggle:focus-visible {
+  color: var(--green);
+  border-color: var(--green);
+}
+.is-collapsed > .panel-heading {
+  margin-bottom: 0;
+}
+.is-collapsed > .panel-heading > label,
+.is-collapsed > .panel-heading > select {
+  display: none;
+}
+.panel-content > :first-child {
+  margin-top: 0;
+}
+.panel-content > :last-child {
+  margin-bottom: 0;
+}
+.reference-clock {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.reference-clock time {
+  font: 13px var(--mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.primary-clock {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.primary-clock time {
+  font-size: 30px;
+  color: var(--green);
+}
 .section-heading {
   display: flex;
   align-items: center;
@@ -1262,5 +1329,27 @@ footer > span:last-child {
   }
   .activity-highlights > div:last-child {
     grid-column: 1 / -1;
+  }
+  .activity-heading.panel-heading,
+  .budget-heading.panel-heading,
+  .positions-panel > .chart-heading.panel-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    align-items: start;
+    gap: 10px;
+  }
+  .activity-heading.panel-heading > label,
+  .budget-heading.panel-heading > label,
+  .positions-panel > .chart-heading.panel-heading > select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 100%;
+  }
+  .activity-heading.panel-heading > .panel-toggle,
+  .budget-heading.panel-heading > .panel-toggle,
+  .positions-panel > .chart-heading.panel-heading > .panel-toggle {
+    grid-column: 2;
+    grid-row: 1;
   }
 }

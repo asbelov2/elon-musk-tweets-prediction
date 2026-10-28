@@ -115,7 +115,7 @@ export function renderActivity(analysis: Analysis) {
   const zone = profile.timezone;
   $('activity-title').textContent = `Ритм публикаций @${analysis.handle ?? 'elonmusk'}`;
   $('activity-meta').textContent =
-    `${zone} · ${profile.training_days} полных дней истории · данные до ${clock(profile.history_end, zone, true)} · расчёт ${clock(profile.as_of, zone, true)}. Свежая история весит больше; вес уменьшается вдвое за 21 день.`;
+    `Время графиков и окон активности: ${zone === 'America/New_York' ? 'Нью-Йорк (ET) · ' : ''}${zone} · ${profile.training_days} полных дней истории · данные до ${clock(profile.history_end, zone, true)} · расчёт ${clock(profile.as_of, zone, true)}. Свежая история весит больше; вес уменьшается вдвое за 21 день.`;
   renderSelectedDay();
   $('activity-next').textContent = `≈ ${n(profile.next_three_hours.expected)} публикаций`;
   $('activity-next-chance').textContent =

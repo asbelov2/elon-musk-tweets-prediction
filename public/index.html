@@ -32,12 +32,6 @@
             ожиданием.
           </p>
         </div>
-        <button id="demo" class="button secondary">Посмотреть демо <span>↗</span></button>
-      </div>
-      <div id="demo-banner" class="notice demo-notice" hidden>
-        <strong>Демонстрационный режим.</strong> История, цены и сигналы искусственные. Они
-        показывают работу программы и не подходят для ставок.
-        <button id="go-live" class="text-button">Перейти к реальным данным →</button>
       </div>
       <div id="message" class="notice" role="status" hidden></div>
       <section class="panel market-picker">
@@ -64,12 +58,18 @@
                 id="new-market-handle"
                 type="text"
                 maxlength="16"
-                placeholder="Например, WhiteHouse"
+                placeholder="@elonmusk"
+                list="account-suggestions"
+                autocomplete="off"
             /></label>
             <label
               >Название (необязательно)<input id="new-market-label" type="text" maxlength="120"
             /></label>
           </div>
+          <datalist id="account-suggestions">
+            <option value="@elonmusk"></option>
+            <option value="@WhiteHouse"></option>
+          </datalist>
           <button id="add-market" class="button secondary">Проверить и добавить рынок</button>
           <p class="muted small">
             Поддерживаются рынки количества публикаций с Post Counter XTracker. Ссылка и аккаунт
@@ -81,9 +81,30 @@
           рассчитывать бюджет.
         </p>
       </section>
+      <p id="display-timezone-note" class="muted small">
+        Время периода, графиков и ритма — Нью-Йорк (ET). Время обновлений — Москва (МСК). Переход на
+        летнее время учитывается автоматически.
+      </p>
       <div class="workspace">
         <aside>
-          <section class="panel setup-panel">
+          <section class="panel reference-clocks" data-panel="clocks">
+            <h2>Время для ориентира</h2>
+            <div class="reference-clock primary-clock">
+              <span>Техас · ориентир для Маска</span><time id="texas-clock"></time>
+              <small id="texas-date"></small><small id="texas-zone"></small>
+            </div>
+            <div class="reference-clock">
+              <span>Нью-Йорк · время рынка</span><time id="market-clock"></time>
+            </div>
+            <div class="reference-clock">
+              <span>Москва · МСК</span><time id="moscow-clock"></time>
+            </div>
+            <p class="muted small">
+              Техас: America/Chicago. Часы показывают время региона, а не текущее местоположение
+              Маска.
+            </p>
+          </section>
+          <section class="panel setup-panel" data-panel="data">
             <div class="section-heading">
               <span class="step">01</span>
               <h2>Данные</h2>
@@ -94,104 +115,32 @@
               желательно 90.
             </p>
             <div class="data-summary" id="data-summary">
-              Импортируйте историю или включите демо.
+              Загрузите историю выбранного аккаунта из XTracker.
             </div>
-            <label
-              >История для прогноза<select id="history-source">
-                <option value="xtracker">XTracker · основной источник рынка</option>
-                <option value="live">API X / CSV · дополнительная история</option>
-              </select></label
-            >
             <div id="history-management" hidden>
-              <div class="source-tabs" role="tablist" aria-label="Источник истории">
-                <button id="tab-csv" role="tab" aria-selected="false">CSV</button
-                ><button class="selected" id="tab-tracker" role="tab" aria-selected="true">
-                  API X / XTracker
-                </button>
-              </div>
-              <div id="csv-panel" hidden>
-                <label class="upload" for="csv-file"
-                  ><span class="upload-icon">↑</span><strong>Выберите CSV-файл</strong
-                  ><span>timestamp,count · до 5 МБ</span
-                  ><input id="csv-file" type="file" accept=".csv,text/csv"
-                /></label>
-                <p class="file-name" id="file-name"></p>
-                <label class="checkbox"
-                  ><input id="csv-confirm" type="checkbox" /><span
-                    >Каждая строка — полный час; типы публикаций соответствуют правилам рынка.</span
-                  ></label
-                ><button class="button secondary wide" id="import">Импортировать историю</button>
-              </div>
-              <div id="tracker-panel">
-                <label
-                  >Источник<select id="collector-source">
-                    <option value="xtracker">XTracker · Post Counter / Export Data</option>
-                    <option value="x">Официальный API X (дополнительно)</option>
-                  </select></label
-                >
-                <div id="x-options" hidden>
-                  <label
-                    >Доступ API X<select id="x-mode">
-                      <option value="archive">Полный архив · search/all</option>
-                      <option value="timeline">Лента · последние публикации</option>
-                    </select></label
-                  >
-                  <p id="x-key-status" class="muted small">Ключ: проверка…</p>
-                  <p class="muted small">
-                    Ключ X_BEARER_TOKEN задаётся только в секретах среды. Запросы расходуют лимит
-                    вашего тарифа. Лента отклоняется, если не достигает начала периода; для длинной
-                    истории нужен архив.
-                  </p>
-                </div>
-                <p class="muted small">
-                  XTracker: полный Export Data сверяется с числом записей источника и Post Counter
-                  выбранного события. Состав публикаций сохраняется как у трекера, без повторной
-                  фильтрации ответов и репостов. Токен X для этого не нужен.
-                </p>
-                <label
-                  >Глубина истории, дней<input
-                    id="history-days"
-                    type="number"
-                    min="15"
-                    max="120"
-                    step="1"
-                    required
-                    value="90"
-                /></label>
-                <div id="x-filters" hidden>
-                  <div class="check-row">
-                    <label class="checkbox"
-                      ><input id="include-reposts" type="checkbox" checked /><span
-                        >Репосты</span
-                      ></label
-                    ><label class="checkbox"
-                      ><input id="include-replies" type="checkbox" /><span>Ответы</span></label
-                    >
-                  </div>
-                  <p class="muted small">
-                    Обычные и цитирующие публикации включены. Сверьте состав с правилами конкретного
-                    рынка.
-                  </p>
-                </div>
-                <button id="collect" class="button secondary wide">Собрать историю</button>
-                <p id="history-message" class="notice error" role="alert" hidden></p>
-                <div id="collection-preview" hidden>
-                  <p id="preview-text" class="muted"></p>
-                  <label class="checkbox"
-                    ><input id="tracker-confirm" type="checkbox" /><span
-                      >Проверил полноту всего интервала и правила подсчёта.</span
-                    ></label
-                  ><button id="confirm-collect" class="button secondary wide">
-                    Сохранить сбор
-                  </button>
-                </div>
-              </div>
+              <p class="muted small">
+                Источник: XTracker · Post Counter / Export Data. Полнота экспорта и счётчик
+                проверяются автоматически.
+              </p>
+              <label
+                >Глубина истории, дней<input
+                  id="history-days"
+                  type="number"
+                  min="15"
+                  max="120"
+                  step="1"
+                  required
+                  value="90"
+              /></label>
+              <button id="collect" class="button secondary wide">Загрузить историю</button>
+              <p id="history-message" class="notice error" role="alert" hidden></p>
+              <p id="history-result" class="muted small" role="status" hidden></p>
             </div>
             <a id="export-history" class="small-link" href="/api/export?dataset=xtracker"
               >Экспорт реальной истории в CSV ↓</a
             >
           </section>
-          <section class="panel setup-panel">
+          <section class="panel setup-panel" data-panel="market">
             <div class="section-heading">
               <span class="step">02</span>
               <h2>Рынок и период</h2>
@@ -218,46 +167,17 @@
               <strong id="tracker-heading">Post Counter · XTracker</strong>
               <p id="tracker-summary"></p>
             </div>
-            <label
-              >Часовой пояс периода<select id="timezone">
-                <option value="America/New_York">Нью-Йорк · America/New_York</option>
-                <option value="UTC">UTC</option>
-                <option value="Europe/Moscow">Москва · Europe/Moscow</option>
-              </select></label
-            >
-            <label
-              >Начало подсчёта, включительно<input
-                id="start"
-                type="datetime-local"
-                step="3600"
-                value="2026-10-13T12:00" /></label
-            ><label
-              >Конец подсчёта, не включительно<input
-                id="end"
-                type="datetime-local"
-                step="3600"
-                value="2026-10-20T12:00"
-            /></label>
-            <p class="muted small">
-              Для рынка XTracker период выбирается автоматически по трекеру. Эти поля используются
-              для отдельного прогноза.
+            <p id="period-timezone" class="muted small">
+              Период рынка: Нью-Йорк · ET · America/New_York. Границы задаёт XTracker.
             </p>
-            <details>
-              <summary>Прогноз на отдельный день</summary>
-              <label>Дата в выбранном часовом поясе<input type="date" id="target-date" /></label
-              ><button id="one-day" class="button secondary wide">Выбрать сутки 00:00–00:00</button>
-              <p class="muted small">
-                Кнопка очистит ссылку на рынок и выберет отдельный суточный прогноз.
-              </p>
-            </details>
-            <label class="checkbox"
-              ><input id="rules-confirm" type="checkbox" /><span
-                >Период, учёт ответов/репостов и полнота истории соответствуют правилам этого
-                события.</span
-              ></label
-            >
+            <label
+              >Начало подсчёта, включительно<input id="start" type="datetime-local" readonly
+            /></label>
+            <label
+              >Конец подсчёта, не включительно<input id="end" type="datetime-local" readonly
+            /></label>
           </section>
-          <section class="panel setup-panel">
+          <section class="panel setup-panel" data-panel="forecast">
             <div class="section-heading">
               <span class="step">03</span>
               <h2>Расчёт вероятностей</h2>
@@ -304,10 +224,9 @@
             <div class="eyebrow">ВАША АНАЛИТИЧЕСКАЯ ПАНЕЛЬ</div>
             <h2>Начните с истории публикаций</h2>
             <p id="empty-summary">
-              Загрузите почасовые данные, выберите период и получите распределение вероятностей.
-              Затем сравните его с реальными ценами покупки.
+              Загрузите историю XTracker и рассчитайте вероятности для выбранного рынка. Затем
+              сравните его с реальными ценами покупки.
             </p>
-            <button class="button primary" id="demo-empty">Открыть демонстрацию →</button>
             <div class="empty-steps">
               <span>01 История</span><span>02 Прогноз</span><span>03 Ожидаемая доходность</span>
             </div>
@@ -343,7 +262,7 @@
               </article>
             </div>
             <div id="warnings" class="warnings" aria-live="polite"></div>
-            <section class="panel chart-panel">
+            <section class="panel chart-panel" data-panel="distribution">
               <div class="chart-heading">
                 <div>
                   <h2>Распределение итогового количества</h2>
@@ -363,15 +282,81 @@
                 <span>Число публикаций за выбранный период</span><span id="model-label"></span>
               </div>
             </section>
-            <section class="panel outcomes-panel">
-              <h2>Вероятности исходов</h2>
-              <p id="outcome-summary" class="muted small"></p>
+            <section id="activity-panel" class="panel" data-panel="activity" hidden>
+              <div class="activity-heading">
+                <h2 id="activity-title">Ритм публикаций</h2>
+                <label
+                  >Профиль дня<select id="activity-day">
+                    <option value="all">Среднее по неделе</option>
+                    <option value="0">Понедельник</option>
+                    <option value="1">Вторник</option>
+                    <option value="2">Среда</option>
+                    <option value="3">Четверг</option>
+                    <option value="4">Пятница</option>
+                    <option value="5">Суббота</option>
+                    <option value="6">Воскресенье</option>
+                  </select></label
+                >
+              </div>
+              <p id="activity-meta" class="muted small"></p>
+              <div id="activity-warnings" class="warnings"></div>
+              <div class="activity-highlights">
+                <div>
+                  <span>Обычно тише · 6 часов</span><strong id="activity-quiet"></strong
+                  ><small id="activity-quiet-rate"></small>
+                </div>
+                <div>
+                  <span>Обычно активнее · 6 часов</span><strong id="activity-peak"></strong
+                  ><small id="activity-peak-rate"></small>
+                </div>
+                <div>
+                  <span>3 часа после расчёта</span><strong id="activity-next"></strong
+                  ><small id="activity-next-chance"></small>
+                </div>
+              </div>
+              <div class="activity-chart-grid">
+                <div>
+                  <h3>По часам · публикаций/ч</h3>
+                  <div
+                    id="activity-hourly"
+                    class="activity-chart"
+                    role="img"
+                    aria-label="Среднее число публикаций по часам суток"
+                  ></div>
+                </div>
+                <div>
+                  <h3>По дням недели · публикаций/24 ч</h3>
+                  <div
+                    id="activity-weekdays"
+                    class="activity-chart"
+                    role="img"
+                    aria-label="Среднее число публикаций по дням недели"
+                  ></div>
+                </div>
+              </div>
+              <p id="activity-trend" class="muted small"></p>
+              <details class="activity-details">
+                <summary>Почасовая карта недели</summary>
+                <p class="muted small">
+                  Светлее — выше ожидаемая активность. Наведите или перейдите клавишей Tab к ячейке
+                  для оценки и числа наблюдений.
+                </p>
+                <div
+                  id="activity-heatmap"
+                  class="activity-heatmap"
+                  role="group"
+                  aria-label="Активность по дням недели и часам"
+                ></div>
+              </details>
+              <h3>Ближайшие 12 часов · от момента расчёта</h3>
+              <div id="activity-upcoming" class="activity-upcoming"></div>
               <p class="muted small">
-                Оценки модели, а не гарантии. Ошибка модели может быть больше погрешности симуляции.
+                Тихие часы означают меньше публикаций; определить сон по этим данным нельзя.
+                Почасовой и недельный ритм учитывается в прогнозе. Вероятности и 80% интервалы —
+                оценки модели по 4 000 сценариям.
               </p>
-              <div id="outcomes"></div>
             </section>
-            <section class="panel budget-panel">
+            <section class="panel budget-panel" data-panel="budget">
               <div class="budget-heading">
                 <h2>Куда направить бюджет</h2>
                 <label
@@ -429,7 +414,7 @@
                 </p>
               </details>
             </section>
-            <section class="panel positions-panel">
+            <section class="panel positions-panel" data-panel="positions">
               <div class="chart-heading">
                 <div>
                   <h2>Цена против вероятности</h2>
@@ -527,86 +512,20 @@
                 гарантирует прибыль.
               </p>
             </section>
-            <section id="activity-panel" class="panel" hidden>
-              <div class="activity-heading">
-                <h2 id="activity-title">Ритм публикаций</h2>
-                <label
-                  >Профиль дня<select id="activity-day">
-                    <option value="all">Среднее по неделе</option>
-                    <option value="0">Понедельник</option>
-                    <option value="1">Вторник</option>
-                    <option value="2">Среда</option>
-                    <option value="3">Четверг</option>
-                    <option value="4">Пятница</option>
-                    <option value="5">Суббота</option>
-                    <option value="6">Воскресенье</option>
-                  </select></label
-                >
-              </div>
-              <p id="activity-meta" class="muted small"></p>
-              <div id="activity-warnings" class="warnings"></div>
-              <div class="activity-highlights">
-                <div>
-                  <span>Обычно тише · 6 часов</span><strong id="activity-quiet"></strong
-                  ><small id="activity-quiet-rate"></small>
-                </div>
-                <div>
-                  <span>Обычно активнее · 6 часов</span><strong id="activity-peak"></strong
-                  ><small id="activity-peak-rate"></small>
-                </div>
-                <div>
-                  <span>3 часа после расчёта</span><strong id="activity-next"></strong
-                  ><small id="activity-next-chance"></small>
-                </div>
-              </div>
-              <div class="activity-chart-grid">
-                <div>
-                  <h3>По часам · публикаций/ч</h3>
-                  <div
-                    id="activity-hourly"
-                    class="activity-chart"
-                    role="img"
-                    aria-label="Среднее число публикаций по часам суток"
-                  ></div>
-                </div>
-                <div>
-                  <h3>По дням недели · публикаций/24 ч</h3>
-                  <div
-                    id="activity-weekdays"
-                    class="activity-chart"
-                    role="img"
-                    aria-label="Среднее число публикаций по дням недели"
-                  ></div>
-                </div>
-              </div>
-              <p id="activity-trend" class="muted small"></p>
-              <details class="activity-details">
-                <summary>Почасовая карта недели</summary>
-                <p class="muted small">
-                  Светлее — выше ожидаемая активность. Наведите или перейдите клавишей Tab к ячейке
-                  для оценки и числа наблюдений.
-                </p>
-                <div
-                  id="activity-heatmap"
-                  class="activity-heatmap"
-                  role="group"
-                  aria-label="Активность по дням недели и часам"
-                ></div>
-              </details>
-              <h3>Ближайшие 12 часов · от момента расчёта</h3>
-              <div id="activity-upcoming" class="activity-upcoming"></div>
+            <section class="panel outcomes-panel" data-panel="outcomes">
+              <h2>Вероятности исходов</h2>
+              <p id="outcome-summary" class="muted small"></p>
               <p class="muted small">
-                Тихие часы означают меньше публикаций; определить сон по этим данным нельзя.
-                Почасовой и недельный ритм учитывается в прогнозе. Вероятности и 80% интервалы —
-                оценки модели по 4 000 сценариям.
+                Оценки модели, а не гарантии. Ошибка модели может быть больше погрешности симуляции.
               </p>
+              <div id="outcomes"></div>
             </section>
             <div class="bottom-grid">
-              <section class="panel chart-panel">
+              <section class="panel chart-panel" data-panel="history">
                 <div class="chart-heading">
                   <div>
                     <h2>История активности</h2>
-                    <p>Последние 42 полных дня · в часовом поясе периода</p>
+                    <p>Последние 42 полных дня · Нью-Йорк (ET)</p>
                   </div>
                   <span class="legend"><i class="muted-dot"></i> Постов / день</span>
                 </div>
@@ -617,7 +536,7 @@
                   aria-label="История публикаций по дням"
                 ></div>
               </section>
-              <section class="panel validation-panel">
+              <section class="panel validation-panel" data-panel="validation">
                 <span class="eyebrow">ПРОВЕРКА НА ПРОШЛЫХ ДНЯХ</span>
                 <h2>Насколько точен прогноз?</h2>
                 <div class="validation-metrics">

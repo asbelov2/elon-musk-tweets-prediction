@@ -3,7 +3,11 @@ import { trackerFixture, whiteHouseFixture, SLUG, WHITE_HOUSE_SLUG } from '../fi
 import { collectTracker } from '../../src/server/xtracker.js';
 import type { Analysis } from '../../src/shared/types.js';
 
-test('Demo, outcome probabilities and interactive budget without recalculation', async ({
+test.beforeEach(async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-18T12:20:00Z') });
+});
+
+test('XTracker forecast, outcome probabilities and interactive budget without recalculation', async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -12,10 +16,9 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   const analysisResponse = page.waitForResponse((response) =>
     response.url().endsWith('/api/analyze'),
   );
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   const analysis = (await (await analysisResponse).json()) as Analysis;
   await expect(page.locator('#result-content')).toBeVisible();
-  await expect(page.locator('#demo-banner')).toBeVisible();
   await expect(page.locator('#positions-body tr')).toHaveCount(14);
   const markets = [...analysis.event!.markets].sort((a, b) => a.lower - b.lower);
   await expect(page.locator('#outcomes .outcome-label')).toHaveText(markets.map((m) => m.label));
@@ -43,8 +46,7 @@ test('Demo, outcome probabilities and interactive budget without recalculation',
   await expect(page.locator('#allocation')).not.toBeEmpty();
   await expect(page.locator('#bank-plan')).toBeVisible();
   await expect(page.locator('#outcomes progress')).toHaveCount(7);
-  await page.locator('#go-live').click();
-  await expect(page.locator('#demo-banner')).toBeHidden();
+  await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
   await expect(page.locator('#result-content')).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -66,7 +68,7 @@ test('Cash advice keeps a full-bank scenario visible and budget changes do not r
     await route.fulfill({ json: analysis });
   });
   await page.goto('/');
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   await expect(page.locator('#result-content')).toBeVisible();
   for (const budget of [100, 200]) {
     await page.locator('#budget').fill(String(budget));
@@ -102,7 +104,7 @@ test('Position columns sort numerically both ways and explain headers on hover o
     await route.fulfill({ json: analysis });
   });
   await page.goto('/');
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   await expect(page.locator('#positions-body tr')).toHaveCount(14);
   const columns = ['probability', 'vwap', 'edge', 'expected_profit', 'roi'];
   for (const [index, column] of columns.entries()) {
@@ -178,7 +180,7 @@ test('Many market brackets stay exact and readable within a horizontally scrolli
     await route.fulfill({ json: analysis });
   });
   await page.goto('/');
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   await expect(page.locator('#distribution rect')).toHaveCount(26);
   await expect(page.locator('#distribution rect title').first()).toHaveText('0-19: 0,00%');
   await expect(page.locator('#distribution rect').first()).toHaveAttribute('height', '0');
@@ -197,52 +199,35 @@ test('Many market brackets stay exact and readable within a horizontally scrolli
     .screenshot({ path: '/tmp/tweetscope-layout-market-mobile.png' });
 });
 
-test('CSV import, forecast without a market and CSV export', async ({ page }) => {
-  const end = Math.floor(Date.now() / 3_600_000) * 3_600_000;
-  const content =
-    'timestamp,count\n' +
-    Array.from(
-      { length: 40 * 24 },
-      (_, i) => `${new Date(end - (40 * 24 - i) * 3_600_000).toISOString()},${i % 7}`,
-    ).join('\n');
+test('Streamlined XTracker interface, CSV export and offline API documentation', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
-  await page.locator('#tab-csv').click();
-  await page
-    .locator('#csv-file')
-    .setInputFiles({ name: 'history.csv', mimeType: 'text/csv', buffer: Buffer.from(content) });
-  await page.locator('#csv-confirm').check();
-  await page.locator('#import').click();
-  await expect(page.locator('#message')).toContainText('Импортировано 960');
-  await page.locator('#event-url').fill('');
-  await page.locator('#timezone').selectOption('UTC');
-  await page.locator('#start').fill(new Date(end).toISOString().slice(0, 16));
-  await page.locator('#end').fill(new Date(end + 86_400_000).toISOString().slice(0, 16));
-  await page.locator('#analyze').click();
-  await expect(page.locator('#result-content')).toBeVisible();
-  await expect(page.locator('#result-title')).not.toContainText('демо');
-  await expect(page.locator('#positions-body')).toContainText('Рынок не выбран');
-  await expect(page.locator('#distribution-description')).toContainText('без выбранного рынка');
-  await expect(page.locator('#activity-meta')).toContainText('UTC');
+  await expect(page.locator('#history-management')).toBeVisible();
+  for (const id of [
+    'demo',
+    'demo-empty',
+    'demo-banner',
+    'history-source',
+    'collector-source',
+    'csv-panel',
+    'csv-confirm',
+    'tracker-confirm',
+    'rules-confirm',
+    'one-day',
+    'target-date',
+  ])
+    await expect(page.locator('#' + id)).toHaveCount(0);
+  await expect(page.locator('#period-timezone')).toContainText('America/New_York');
+  await expect(page.locator('#start')).toHaveAttribute('readonly', '');
+  await expect(page.locator('#end')).toHaveAttribute('readonly', '');
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByText('Экспорт реальной истории в CSV').click(),
   ]);
   expect(download.suggestedFilename()).toBe('tweets-hourly.csv');
-});
-
-test('X source controls and offline API documentation', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('/');
-  await page.locator('#tab-tracker').click();
-  await page.locator('#collector-source').selectOption('x');
-  await expect(page.locator('#x-options')).toBeVisible();
-  await expect(page.locator('#x-key-status')).toContainText('не настроен');
-  await page.locator('#collector-source').selectOption('xtracker');
-  await expect(page.locator('#x-options')).toBeHidden();
-  await page.locator('#collector-source').selectOption('x');
-  await page.locator('#x-mode').selectOption('timeline');
-  await expect(page.locator('#x-options')).toBeVisible();
   await page.goto('/api/docs');
   await expect(
     page.locator('#api-paths summary').filter({ hasText: 'GET /api/markets' }),
@@ -259,7 +244,7 @@ test('X source controls and offline API documentation', async ({ page }) => {
 
 test('Dashboard fits mobile and desktop viewports', async ({ page }) => {
   await page.goto('/');
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   await expect(page.locator('#result-content')).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -267,14 +252,14 @@ test('Dashboard fits mobile and desktop viewports', async ({ page }) => {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     const spacing = await page.evaluate(() => {
-      const outcomes = document.querySelector('.outcomes-panel')!.getBoundingClientRect();
+      const activity = document.querySelector('#activity-panel')!.getBoundingClientRect();
       const budget = document.querySelector('.budget-panel')!.getBoundingClientRect();
       const positions = document.querySelector('.positions-panel')!.getBoundingClientRect();
       const heading = document.querySelector('.outcomes-panel h2')!.getBoundingClientRect();
       return [
-        budget.top - outcomes.bottom,
+        budget.top - activity.bottom,
         positions.top - budget.bottom,
-        heading.left - outcomes.left,
+        heading.left - document.querySelector('.outcomes-panel')!.getBoundingClientRect().left,
       ];
     });
     expect(spacing.every((gap) => gap >= 12)).toBe(true);
@@ -282,7 +267,9 @@ test('Dashboard fits mobile and desktop viewports', async ({ page }) => {
   await page.locator('#result-content').screenshot({ path: '/tmp/tweetscope-layout-desktop.png' });
 });
 
-test('XTracker preview, isolated history and authoritative period controls', async ({ page }) => {
+test('One-click XTracker collection saves verified history and applies the authoritative period', async ({
+  page,
+}) => {
   const fixture = trackerFixture(),
     collection = await collectTracker(
       { days: 30, event_url: SLUG },
@@ -334,21 +321,14 @@ test('XTracker preview, isolated history and authoritative period controls', asy
   });
   await page.route('**/api/xtracker?*', (route) => route.fulfill({ json: report }));
   await page.goto('/');
-  await expect(page.locator('#history-source')).toHaveValue('xtracker');
-  await page.locator('#tab-tracker').click();
-  await expect(page.locator('#collector-source')).toHaveValue('xtracker');
-  await expect(page.locator('#x-filters')).toBeHidden();
   await page.locator('#collect').click();
-  await expect(page.locator('#collection-preview')).toBeVisible();
-  await expect(page.locator('#preview-text')).toContainText('Post Counter');
+  await expect(page.locator('#history-result')).toBeVisible();
+  await expect(page.locator('#history-result')).toContainText('Post Counter');
   await expect(page.locator('#tracker-summary')).toContainText(String(report.count));
   await expect(page.locator('#start')).toHaveValue(report.local_start);
   await expect(page.locator('#end')).toHaveValue(report.local_end);
-  await page.locator('#tracker-confirm').check();
-  await page.locator('#confirm-collect').click();
-  await expect(page.locator('#message')).toContainText('Сохранено 720');
+  await expect(page.locator('#message')).toContainText('проверена и сохранена');
   await expect(page.locator('#data-summary')).toContainText('xtracker:post-counter:v1');
-  await page.locator('#start').fill('2026-10-14T12:00');
   await page.locator('#sync-tracker').click();
   await expect(page.locator('#start')).toHaveValue(report.local_start);
   expect(legacyRequests).toBe(0);
@@ -366,7 +346,6 @@ test('Collection validates depth locally and displays server and network errors 
   });
   await page.goto('/');
   await expect(page.locator('#history-management')).toBeVisible();
-  await page.locator('#tab-tracker').click();
   for (const value of ['', '14', '15.5', '121']) {
     await page.locator('#history-days').fill(value);
     await page.locator('#collect').click();
@@ -381,7 +360,7 @@ test('Collection validates depth locally and displays server and network errors 
   failNetwork = true;
   await page.locator('#collect').click();
   await expect(page.locator('#history-message')).toContainText('ERR_BLOCKED_BY_CLIENT');
-  await expect(page.locator('#collection-preview')).toBeHidden();
+  await expect(page.locator('#history-result')).toBeHidden();
   await expect(page.locator('#collect')).toBeEnabled();
   expect(requests).toBe(2);
   await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
@@ -393,16 +372,14 @@ test('Market switching resets results and ignores a late counter from the previo
 }) => {
   await page.goto('/');
   await expect(page.locator('#market-select option')).toHaveCount(2);
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   await expect(page.locator('#result-content')).toBeVisible();
   await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
   await expect(page.locator('#result-content')).toBeHidden();
-  await expect(page.locator('#demo-banner')).toBeHidden();
   await expect(page.locator('#selected-account')).toContainText('@WhiteHouse');
   await expect(page.locator('#event-url')).toHaveValue(
     'https://polymarket.com/event/' + WHITE_HOUSE_SLUG,
   );
-  await expect(page.locator('#rules-confirm')).not.toBeChecked();
   await expect(page.locator('#export-history')).toHaveAttribute('href', /handle=WhiteHouse/);
   const f = whiteHouseFixture();
   const report = (
@@ -466,6 +443,11 @@ test('Adding a verified market makes it selectable and visible after reloading t
   await page.goto('/');
   await expect(page.locator('#market-select option')).toHaveCount(2);
   await page.locator('#add-market-form summary').click();
+  await expect(page.locator('#new-market-handle')).toHaveAttribute('placeholder', '@elonmusk');
+  await expect(page.locator('#account-suggestions option').first()).toHaveAttribute(
+    'value',
+    '@elonmusk',
+  );
   await page.locator('#new-market-url').fill(item.event_url);
   await page.locator('#new-market-handle').fill(item.handle);
   await page.locator('#new-market-label').fill(item.label);
@@ -484,7 +466,7 @@ test('Activity profile shows hourly and weekly rhythms, near-term outlook and an
 }) => {
   await page.goto('/');
   const response = page.waitForResponse((r) => r.url().endsWith('/api/analyze'));
-  await page.locator('#demo-empty').click();
+  await page.locator('#analyze').click();
   const analysis = (await (await response).json()) as Analysis;
   await expect(page.locator('#activity-panel')).toBeVisible();
   await expect(page.locator('#activity-title')).toContainText('@elonmusk');
@@ -529,6 +511,12 @@ test('Activity profile shows hourly and weekly rhythms, near-term outlook and an
     .locator('#activity-panel')
     .screenshot({ path: '/tmp/tweetscope-activity-desktop.png' });
   await page.setViewportSize({ width: 390, height: 900 });
+  const headingFits = await page.locator('.activity-heading').evaluate((heading) => {
+    const title = heading.querySelector('h2')!.getBoundingClientRect();
+    const control = heading.querySelector('label')!.getBoundingClientRect();
+    return title.bottom <= control.top || title.right + 8 <= control.left;
+  });
+  expect(headingFits).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(
     await page.locator('#activity-heatmap').evaluate((el) => el.scrollWidth > el.clientWidth),
@@ -536,4 +524,63 @@ test('Activity profile shows hourly and weekly rhythms, near-term outlook and an
   await page.locator('#activity-panel').screenshot({ path: '/tmp/tweetscope-activity-mobile.png' });
   await page.locator('#market-select').selectOption(WHITE_HOUSE_SLUG);
   await expect(page.locator('#result-content')).toBeHidden();
+});
+
+test('Panels collapse with the keyboard, preserve preferences and keep activity above outcomes', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const dataToggle = page.locator('[data-panel="data"] .panel-toggle');
+  await expect(dataToggle).toHaveAttribute('aria-expanded', 'true');
+  await dataToggle.click();
+  await expect(page.locator('#history-management')).toBeHidden();
+  await expect(dataToggle).toHaveAttribute('aria-expanded', 'false');
+  await dataToggle.press('Enter');
+  await expect(page.locator('#history-management')).toBeVisible();
+  await page.locator('#analyze').click();
+  await expect(page.locator('#activity-panel')).toBeVisible();
+  expect(
+    await page
+      .locator('#activity-panel')
+      .evaluate((panel) =>
+        Boolean(
+          panel.compareDocumentPosition(document.querySelector('.outcomes-panel')!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ),
+  ).toBe(true);
+  const toggle = page.locator('#activity-panel .panel-toggle');
+  await toggle.click();
+  await expect(page.locator('#activity-title')).toBeVisible();
+  await expect(page.locator('#activity-upcoming')).toBeHidden();
+  await page.reload();
+  await page.locator('#analyze').click();
+  await expect(page.locator('#activity-panel')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#activity-hourly')).toBeHidden();
+  await toggle.press('Space');
+  await expect(page.locator('#activity-hourly')).toBeVisible();
+  await expect(page.locator('#positions-body tr')).toHaveCount(14);
+});
+
+test('Reference clocks label market time, update every second and adjust Texas daylight saving time', async ({
+  page,
+}) => {
+  await page.clock.pauseAt(new Date('2026-10-18T12:21:00Z'));
+  await page.goto('/');
+  await expect(page.locator('#display-timezone-note')).toContainText('Нью-Йорк (ET)');
+  await expect(page.locator('#display-timezone-note')).toContainText('Москва (МСК)');
+  await expect(page.locator('#texas-clock')).toHaveText('07:21:00');
+  await expect(page.locator('#market-clock')).toHaveText('08:21:00');
+  await expect(page.locator('#moscow-clock')).toHaveText('15:21:00');
+  await expect(page.locator('#texas-zone')).toHaveText('America/Chicago · UTC-5');
+  await page.clock.runFor(1000);
+  await expect(page.locator('#texas-clock')).toHaveText('07:21:01');
+  await page.clock.setSystemTime(new Date('2026-12-18T12:21:00Z'));
+  await page.clock.runFor(1000);
+  await expect(page.locator('#texas-clock')).toHaveText('06:21:01');
+  await expect(page.locator('#market-clock')).toHaveText('07:21:01');
+  await expect(page.locator('#texas-zone')).toHaveText('America/Chicago · UTC-6');
+  await page.locator('#add-market-form summary').click();
+  await expect(page.locator('#new-market-handle')).toHaveAttribute('list', 'account-suggestions');
 });

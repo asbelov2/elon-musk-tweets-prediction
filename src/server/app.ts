@@ -536,6 +536,9 @@ export async function createApp(options: AppOptions = {}) {
       const trackerRequired = /xtracker|post counter/i.test(market.description);
       const trustedHistory =
         body.dataset === 'xtracker' && sources.every((source) => source === TRACKER_SOURCE);
+      const rulesVerified = marketWindow
+        ? Boolean(trustedHistory && tracker?.verified && tracker.sync_ok)
+        : body.rules_confirmed;
       if (trackerRequired && !trustedHistory)
         result.warnings.push(
           'Этот рынок разрешается по Post Counter. Для сигналов выберите отдельную историю XTracker; API X / CSV остаются дополнительными источниками.',
@@ -546,7 +549,7 @@ export async function createApp(options: AppOptions = {}) {
         body.budget,
         body.expense_bps,
         body.safety_pp,
-        body.rules_confirmed &&
+        rulesVerified &&
           result.fresh &&
           (!trackerRequired || trustedHistory) &&
           (body.dataset !== 'xtracker' || Boolean(tracker?.verified && tracker.sync_ok)),
@@ -560,8 +563,12 @@ export async function createApp(options: AppOptions = {}) {
         result.warnings.push(
           `Диапазоны рынка покрывают ${(mass * 100).toFixed(1)}% модельной вероятности. Часть исходов не загружена.`,
         );
-      if (!body.rules_confirmed)
-        result.warnings.push('Подтвердите период и правила рынка, чтобы включить сигналы.');
+      if (!rulesVerified)
+        result.warnings.push(
+          marketWindow
+            ? 'Не удалось автоматически сверить источник и правила рынка. Сигналы отключены.'
+            : 'Подтвердите период и правила рынка, чтобы включить сигналы.',
+        );
       if (market.markets.some((m) => m.fees_enabled))
         result.warnings.push(
           'На рынке включены комиссии. Указанный резерв расходов — ваша оценка; проверьте фактическую ставку перед сделкой.',

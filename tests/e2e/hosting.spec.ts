@@ -23,7 +23,7 @@ test.afterAll(async () => {
   await app.close();
   store.close();
 });
-test('Optional admin mode leaves public demo/calculations available without management controls', async ({
+test('Optional admin mode keeps the public forecast UI and hides management controls', async ({
   page,
 }) => {
   await page.goto(base);
@@ -32,9 +32,9 @@ test('Optional admin mode leaves public demo/calculations available without mana
   await expect(page.locator('#history-management')).toBeHidden();
   await expect(page.locator('#add-market-form')).toBeHidden();
   await expect(page.locator('#access-note')).toContainText('администратор');
-  await page.locator('#demo-empty').click();
-  await expect(page.locator('#result-content')).toBeVisible();
-  await expect(page.locator('#positions-body tr')).toHaveCount(14);
+  await expect(page.locator('#analyze')).toBeVisible();
+  await expect(page.locator('#demo-empty')).toHaveCount(0);
+  await expect(page.locator('#texas-clock')).toBeVisible();
 });
 test('Browser HTTP authentication restores management controls after the admin redirect', async ({
   browser,

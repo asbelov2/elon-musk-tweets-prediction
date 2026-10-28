@@ -230,7 +230,7 @@ test('X collection without a key cannot make metered network calls', async (t) =
   assert.match(response.json<{ detail: string }>().detail, /X_BEARER_TOKEN/);
   assert.equal(calls, 0);
 });
-test('XTracker workflow anchors Post Counter, isolates history and blocks signals on sync error', async (t) => {
+test('XTracker automatically verifies rules, anchors Post Counter and blocks signals on sync error', async (t) => {
   const f = trackerFixture(now),
     { app, store } = await setup(t, f.transport);
   const previewResponse = await app.inject({
@@ -261,7 +261,7 @@ test('XTracker workflow anchors Post Counter, isolates history and blocks signal
     start: iso(f.start),
     end: iso(f.end),
     timezone: 'America/New_York',
-    rules_confirmed: true,
+    rules_confirmed: false,
   };
   const response = await app.inject({ method: 'POST', url: '/api/analyze', payload });
   assert.equal(response.statusCode, 200, response.body);
@@ -270,6 +270,7 @@ test('XTracker workflow anchors Post Counter, isolates history and blocks signal
   assert.equal(result.tracker?.verified, true);
   assert.equal(result.fresh, true);
   assert.ok(result.positions.some((p) => p.signal));
+  assert.ok(result.warnings.every((warning) => !warning.includes('Подтвердите')));
   assert.equal(store.load('live').data.size, 0);
   f.profile.lastSyncError = iso(now);
   const failed = (
