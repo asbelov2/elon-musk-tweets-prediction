@@ -1,0 +1,33 @@
+[Unit]
+Description=TweetScope post-count analytics
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tweetscope
+Group=tweetscope
+WorkingDirectory=/opt/tweetscope
+Environment=NODE_ENV=production
+Environment=TWEETSCOPE_HOST=0.0.0.0
+Environment=PORT=80
+Environment=TRUST_PROXY_HOPS=0
+Environment=TWEET_DB=/var/lib/tweetscope/tweets.sqlite3
+EnvironmentFile=/etc/tweetscope.env
+ExecStart=/usr/bin/node /opt/tweetscope/dist/src/server/index.js
+StateDirectory=tweetscope
+StateDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=40s
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tweetscope
+
+[Install]
+WantedBy=multi-user.target

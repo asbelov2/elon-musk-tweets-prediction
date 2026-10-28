@@ -4,6 +4,8 @@
 
 ## Хостинг
 
+Для установки **без Docker на VPS 1 vCPU / 1 ГБ RAM** подготовлены [команды Node.js + systemd](deploy/NATIVE.md) и [готовый unit](deploy/tweetscope.service): HTTP по IP, автозапуск, SQLite в `/var/lib/tweetscope`. Настройки нативного сервиса находятся в `/etc/tweetscope.env`.
+
 Для отдельного сервера Timeweb Cloud подготовлены Docker Compose, запуск по IP через HTTP или с доменом через автоматический HTTPS, постоянный том SQLite, онлайн-бэкапы и GitHub Actions. Все функции по умолчанию публичные. Пошаговая инструкция: [deploy/README.md](deploy/README.md). Для небольшой нагрузки начните с 1 vCPU, 2 ГБ RAM и 20 ГБ SSD; используется один экземпляр приложения. Runtime проверяется также при лимитах 1 CPU / 1 ГБ. Для другого VPS подготовлена [инструкция переноса всей базы и настроек](deploy/MIGRATION.md).
 
 ## Запуск
